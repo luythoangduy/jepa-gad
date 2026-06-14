@@ -171,7 +171,12 @@ class GADJEPABase(nn.Module):
         proj = F.normalize(self.projector(z_online[:batch_size]), dim=-1)
         center = F.normalize(self.normal_center.detach().view(1, -1), dim=-1)
         center_dist = 1 - (proj * center).sum(dim=-1)
-        score = pred_error + projector_dist + center_dist
+        
+        score = pred_error.clone()
+        if self.normal_weight > 0:
+            score += projector_dist
+        if self.contrast_mode != 'none' and self.contrast_weight > 0:
+            score += center_dist
 
         if self.training:
             self.update_normal_center(proj, score)

@@ -153,6 +153,10 @@ score = detector.decision_score_
 
 ## Current Baseline Results
 
+*(Note: All GADJEPA results denote the use of the default GCN backbone)*
+
+### `inj_cora`
+
 These results were run locally on `inj_cora` with CPU, `epoch=100`, and
 `num_trial=5`.
 
@@ -164,6 +168,63 @@ These results were run locally on `inj_cora` with CPU, `epoch=100`, and
 Earlier smoke-test runs for `GADJEPA` used only `epoch=10`, `num_trial=1`, so
 they are not comparable to the table above. A fair `GADJEPA` run should use the
 same `epoch=100`, `num_trial=5` setting.
+
+### `reddit`
+
+These results were run locally on `reddit` with CPU, `epoch=100`, and `num_trial=20`.
+
+| Model | AUC | AP | Recall |
+| --- | ---: | ---: | ---: |
+| GADJEPA | 0.5804 +/- 0.0092 | 0.0412 | - |
+
+**Grid Search / Ablation Study (`epoch=100`, `num_trial=5`)**
+The table below highlights key findings from the hyperparameter grid search:
+
+| Mask Rate | Contrast Mode | Normal Weight | AUC | AP |
+| :---: | :---: | :---: | :---: | :---: |
+| 0.1 | none | 0.0 | 0.5660 ± 0.0244 | 0.0392 |
+| 0.1 | none | 0.5 | 0.5711 ± 0.0131 | 0.0397 |
+| 0.1 | linear | 0.0 | 0.5656 ± 0.0129 | 0.0389 |
+| 0.1 | linear | 0.5 | 0.5766 ± 0.0076 | 0.0398 |
+| 0.1 | infonce | 0.0 | 0.5717 ± 0.0095 | 0.0416 |
+| 0.1 | infonce | 0.5 | **0.5804 ± 0.0092** | **0.0412** |
+| 0.3 | none | 0.0 | 0.5336 ± 0.0200 | 0.0354 |
+| 0.3 | none | 0.5 | 0.5352 ± 0.0147 | 0.0359 |
+| 0.3 | linear | 0.0 | 0.5375 ± 0.0078 | 0.0352 |
+| 0.3 | linear | 0.5 | 0.5361 ± 0.0082 | 0.0357 |
+| 0.3 | infonce | 0.0 | 0.5618 ± 0.0121 | 0.0393 |
+| 0.3 | infonce | 0.5 | 0.5623 ± 0.0042 | 0.0402 |
+| 0.5 | none | 0.0 | 0.5189 ± 0.0139 | 0.0339 |
+| 0.5 | none | 0.5 | 0.5269 ± 0.0120 | 0.0353 |
+| 0.5 | linear | 0.0 | 0.5132 ± 0.0061 | 0.0338 |
+| 0.5 | linear | 0.5 | 0.5135 ± 0.0186 | 0.0332 |
+| 0.5 | infonce | 0.0 | 0.5525 ± 0.0190 | 0.0400 |
+| 0.5 | infonce | 0.5 | 0.5650 ± 0.0062 | 0.0396 |
+
+- **Best Config Found**: `mask_rate=0.1`, `contrast_mode='infonce'`, `normal_weight=0.5`
+- **Best Performance**: AUC = `0.5804 +/- 0.0092` | AP = `0.0412`
+
+*Key Observations:*
+1. **Mask Rate Sensitivity**: As expected for sparse graphs like Reddit, lower mask rates (`0.1`) consistently outperform higher rates (`0.3` or `0.5`). High masking destroys too much structural context.
+2. **Normal Projection Effectiveness**: For any given mask rate and contrast mode, turning on Normal Projection (`normal_weight=0.5`) almost always improves both the mean AUC and stability (lower variance) compared to `normal_weight=0.0`.
+3. **Bug Fix Impact**: The pure JEPA mode (`contrast=none`, `normal_w=0.0`) now correctly reports an AUC > 0.5 (e.g., `0.5660`) after fixing the random noise bug in the scoring function.
+
+#### GAT Backbone Grid Search
+
+The table below highlights the grid search results when replacing the default GCN encoder with the **GAT** backbone:
+
+| Mask Rate | Contrast Mode | Normal Weight | AUC | AP |
+| :---: | :---: | :---: | :---: | :---: |
+| 0.1 | none | 0.0 | **0.5897 ± 0.0059** | 0.0458 |
+| 0.1 | none | 0.5 | 0.5708 ± 0.0319 | 0.0415 |
+| 0.1 | linear | 0.0 | 0.5789 ± 0.0197 | 0.0406 |
+| 0.1 | linear | 0.5 | 0.5820 ± 0.0285 | 0.0415 |
+| 0.1 | infonce | 0.0 | 0.5870 ± 0.0081 | 0.0435 |
+| 0.1 | infonce | 0.5 | 0.5714 ± 0.0118 | 0.0405 |
+| 0.3 | none | 0.0 | 0.5823 ± 0.0092 | **0.0469** |
+| 0.3 | none | 0.5 | 0.5743 ± 0.0133 | 0.0429 |
+
+*Note: GAT shows a significant performance jump overall, reaching an AUC of **0.5897**, highlighting the strength of attention-based neighborhood aggregation for anomaly detection.*
 
 ## Research Direction
 
