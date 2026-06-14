@@ -170,7 +170,7 @@ def load_data(name, cache_dir=None):
     zip_path = os.path.join(cache_dir, name+'.pt.zip')
 
     if os.path.exists(file_path):
-        data = torch.load(file_path)
+        data = torch.load(file_path, weights_only=False)
     else:
         url = "https://github.com/pygod-team/data/raw/main/" + name + ".pt.zip"
         if not os.path.exists(cache_dir):
@@ -183,7 +183,7 @@ def load_data(name, cache_dir=None):
                 if chunk:  # filter out keep-alive new chunks
                     f.write(chunk)
         shutil.unpack_archive(zip_path, cache_dir)
-        data = torch.load(file_path)
+        data = torch.load(file_path, weights_only=False)
     return data
 
 

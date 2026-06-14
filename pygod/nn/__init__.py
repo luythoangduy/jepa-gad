@@ -9,6 +9,7 @@ from .gaan import GAANBase
 from .gadnr import GADNRBase
 from .gae import GAEBase
 from .guide import GUIDEBase
+from .jepa import GADJEPABase
 from .ocgnn import OCGNNBase
 from . import conv
 from . import decoder
@@ -17,5 +18,6 @@ from . import functional
 
 __all__ = [
     "AdONEBase", "AnomalyDAEBase", "CARDBase", "CoLABase", "DMGDBase", "DOMINANTBase",
-    "DONEBase", "GAANBase", "GADNRBase", "GAEBase", "GUIDEBase", "OCGNNBase"
+    "DONEBase", "GAANBase", "GADNRBase", "GAEBase", "GUIDEBase",
+    "GADJEPABase", "OCGNNBase"
 ]

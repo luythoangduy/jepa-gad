@@ -69,6 +69,18 @@ def init_model(args):
                      weight=choice(alpha),
                      batch_size=batch_size,
                      num_neigh=num_neigh)
+    elif model_name == 'gadjepa':
+        return GADJEPA(hid_dim=choice(hid_dim),
+                       weight_decay=weight_decay,
+                       dropout=choice(dropout),
+                       lr=choice(lr),
+                       epoch=epoch,
+                       gpu=gpu,
+                       batch_size=batch_size,
+                       num_neigh=num_neigh,
+                       mask_rate=choice([0.2, 0.3, 0.5]),
+                       contrast_mode=choice(['none', 'linear', 'infonce']),
+                       contrast_weight=choice([0., 0.05, 0.1, 0.2]))
     elif model_name == 'dominant':
         return DOMINANT(hid_dim=choice(hid_dim),
                         weight_decay=weight_decay,

@@ -10,7 +10,7 @@ from utils import init_model
 def main(args):
     auc, ap, rec = [], [], []
 
-    for _ in tqdm.tqdm(range(num_trial)):
+    for _ in tqdm.tqdm(range(args.num_trial)):
         model = init_model(args)
         data = load_data(args.dataset)
 
@@ -40,13 +40,16 @@ def main(args):
           "AUC: {:.4f}±{:.4f} ({:.4f})\t"
           "AP: {:.4f}±{:.4f} ({:.4f})\t"
           "Recall: {:.4f}±{:.4f} ({:.4f})".format(torch.mean(auc),
-                                                  torch.std(auc),
+                                                  torch.std(auc,
+                                                            unbiased=False),
                                                   torch.max(auc),
                                                   torch.mean(ap),
-                                                  torch.std(ap),
+                                                  torch.std(ap,
+                                                            unbiased=False),
                                                   torch.max(ap),
                                                   torch.mean(rec),
-                                                  torch.std(rec),
+                                                  torch.std(rec,
+                                                            unbiased=False),
                                                   torch.max(rec)))
 
 
@@ -55,7 +58,7 @@ if __name__ == '__main__':
     parser.add_argument("--model", type=str, default="dominant",
                         help="supported model: [lof, if, mlpae, scan, radar, "
                              "anomalous, gcnae, dominant, done, adone, "
-                             "anomalydae, gaan, guide, conad]. "
+                             "anomalydae, gaan, guide, conad, gadjepa]. "
                              "Default: dominant")
     parser.add_argument("--gpu", type=int, default=0,
                         help="GPU Index. Default: -1, using CPU.")
@@ -63,9 +66,10 @@ if __name__ == '__main__':
                         help="supported dataset: [inj_cora, inj_amazon, "
                              "inj_flickr, weibo, reddit, disney, books, "
                              "enron]. Default: inj_cora")
+    parser.add_argument("--epoch", type=int, default=None,
+                        help="override training epochs for quick tests.")
+    parser.add_argument("--num_trial", type=int, default=20,
+                        help="number of benchmark trials. Default: 20")
     args = parser.parse_args()
-
-    # global setting
-    num_trial = 20
 
     main(args)

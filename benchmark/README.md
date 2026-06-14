@@ -15,7 +15,7 @@ optional arguments:
   -h, --help         show this help message and exit
   --model MODEL      supported model: [lof, if, mlpae, scan, radar, anomalous,
                      gcnae, dominant, done, adone, anomalydae, gaan, guide,
-                     conad]. Default: dominant
+                     conad, gadjepa]. Default: dominant
   --gpu GPU          GPU Index. Default: -1, using CPU.
   --dataset DATASET  supported dataset: [inj_cora, inj_amazon, inj_flickr,
                      weibo, reddit, disney, books, enron]. Default: inj_cora
@@ -30,7 +30,7 @@ optional arguments:
   -h, --help         show this help message and exit
   --model MODEL      supported model: [lof, if, mlpae, scan, radar, anomalous,
                      gcnae, dominant, done, adone, anomalydae, gaan, guide,
-                     conad]. Default: dominant
+                     conad, gadjepa]. Default: dominant
   --gpu GPU          GPU Index. Default: -1, using CPU.
   --dataset DATASET  supported dataset: [inj_cora, inj_amazon, inj_flickr].
                      Default: inj_cora.
@@ -46,7 +46,7 @@ optional arguments:
   -h, --help     show this help message and exit
   --model MODEL  supported model: [lof, if, mlpae, scan, radar, anomalous,
                  gcnae, dominant, done, adone, anomalydae, gaan, guide,
-                 conad]. Default: dominant
+                 conad, gadjepa]. Default: dominant
   --gpu GPU      GPU Index. Default: -1, using CPU.
 ```
 

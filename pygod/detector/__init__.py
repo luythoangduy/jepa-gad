@@ -14,6 +14,7 @@ from .gaan import GAAN
 from .gadnr import GADNR
 from .gae import GAE
 from .guide import GUIDE
+from .jepa import GADJEPA
 from .ocgnn import OCGNN
 from .one import ONE
 from .radar import Radar
@@ -22,5 +23,5 @@ from .scan import SCAN
 __all__ = [
     "Detector", "DeepDetector", "AdONE", "ANOMALOUS", "AnomalyDAE", "CARD", "CoLA",
     "CONAD", "DMGD", "DOMINANT", "DONE", "GAAN", "GADNR", "GAE", "GUIDE",
-    "OCGNN", "ONE", "Radar", "SCAN"
+    "GADJEPA", "OCGNN", "ONE", "Radar", "SCAN"
 ]
