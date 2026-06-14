@@ -152,7 +152,10 @@ class GADJEPABase(nn.Module):
         z_online = self.online_encoder(x_masked, edge_index)
         pred = self.predictor(z_online)
         with torch.no_grad():
-            z_target = self.target_encoder(x, edge_index)
+            if self.training:
+                z_target = self.target_encoder(x, edge_index)
+            else:
+                z_target = self.online_encoder(x, edge_index)
 
         self.emb = z_online
 
