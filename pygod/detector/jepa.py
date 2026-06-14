@@ -71,6 +71,13 @@ class GADJEPA(DeepDetector):
         if data.x is None:
             raise ValueError('GADJEPA requires node features in data.x.')
 
+    def fit(self, data, label=None):
+        super(GADJEPA, self).fit(data, label)
+
+        self.decision_score_ = self.decision_function(data, label)
+        self._process_decision_score()
+        return self
+
     def init_model(self, **kwargs):
         if self.save_emb:
             self.emb = torch.zeros(self.num_nodes, self.hid_dim)
