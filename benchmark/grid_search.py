@@ -19,7 +19,7 @@ def run_grid_search():
     datasets = ['reddit']
     num_trial = 5
     epoch = 100
-    gpu = 1  # Đổi thành 0 nếu có GPU
+    gpu = -1
     
     # Định nghĩa Grid (Không gian tìm kiếm)
     mask_rates = [0.1, 0.3, 0.5, 0.7]

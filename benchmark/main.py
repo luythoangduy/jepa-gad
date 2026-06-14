@@ -60,7 +60,7 @@ if __name__ == '__main__':
                              "anomalous, gcnae, dominant, done, adone, "
                              "anomalydae, gaan, guide, conad, gadjepa]. "
                              "Default: dominant")
-    parser.add_argument("--gpu", type=int, default=0,
+    parser.add_argument("--gpu", type=int, default=-1,
                         help="GPU Index. Default: -1, using CPU.")
     parser.add_argument("--dataset", type=str, default='inj_cora',
                         help="supported dataset: [inj_cora, inj_amazon, "

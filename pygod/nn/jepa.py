@@ -174,9 +174,9 @@ class GADJEPABase(nn.Module):
         
         score = pred_error.clone()
         if self.normal_weight > 0:
-            score += projector_dist
+            score += self.normal_weight * projector_dist
         if self.contrast_mode != 'none' and self.contrast_weight > 0:
-            score += center_dist
+            score += self.contrast_weight * center_dist
 
         if self.training:
             self.update_normal_center(proj, score)

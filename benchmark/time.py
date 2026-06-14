@@ -50,7 +50,7 @@ if __name__ == '__main__':
                              "anomalous, gcnae, dominant, done, adone, "
                              "anomalydae, gaan, guide, conad]. "
                              "Default: dominant")
-    parser.add_argument("--gpu", type=int, default=0,
+    parser.add_argument("--gpu", type=int, default=-1,
                         help="GPU Index. Default: -1, using CPU.")
     parser.add_argument("--dataset", type=str, default='gen_time',
                         help="Default: gen_time.")

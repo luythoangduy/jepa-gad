@@ -94,7 +94,6 @@ class GADJEPA(DeepDetector):
         x = data.x.to(self.device)
         edge_index = data.edge_index.to(self.device)
 
-        loss, normality_score = self.model(x, edge_index,
-                                           batch_size=batch_size)
-        anomaly_score = -normality_score
+        loss, anomaly_score = self.model(x, edge_index,
+                                         batch_size=batch_size)
         return loss, anomaly_score.detach().cpu()
