@@ -228,10 +228,15 @@ class CONADJEPA(Detector):
             epoch_iter = range(self.epoch)
         for epoch in epoch_iter:
             epoch_loss = 0.0
+            epoch_attr = 0.0
+            epoch_struct = 0.0
+            epoch_jepa = 0.0
+            epoch_margin = 0.0
+            epoch_residual = 0.0
             for node_indices in loader:
                 node_indices = node_indices.to(self.device)
                 optimizer.zero_grad()
-                loss, _, _, _, _ = self.model(
+                loss, residual, _, _, logs = self.model(
                     inputs['x'], inputs['edge_index'],
                     inputs['x_ano'], inputs['edge_index_ano'],
                     inputs['Pi'], inputs['topk_indices'],
@@ -243,19 +248,54 @@ class CONADJEPA(Detector):
                                                    self.grad_clip)
                 optimizer.step()
                 self.model.update_target_encoder(self.ema_momentum)
-                epoch_loss += loss.item() * node_indices.numel()
+                batch_count = residual.numel()
+                epoch_loss += loss.item() * batch_count
+                epoch_attr += logs['loss_attr'] * batch_count
+                epoch_struct += logs['loss_struct'] * batch_count
+                epoch_jepa += logs['loss_jepa'] * batch_count
+                epoch_margin += logs['margin'] * batch_count
+                epoch_residual += residual.detach().mean().item() * \
+                    batch_count
 
             loss_value = epoch_loss / num_nodes
+            attr_value = epoch_attr / num_nodes
+            struct_value = epoch_struct / num_nodes
+            jepa_value = epoch_jepa / num_nodes
+            margin_value = epoch_margin / num_nodes
+            residual_value = epoch_residual / num_nodes
             if self.verbose and trange is not None:
-                epoch_iter.set_postfix(loss='{:.6f}'.format(loss_value))
+                if self.target_mode == 'feature':
+                    epoch_iter.set_postfix(
+                        loss='{:.4f}'.format(loss_value),
+                        attr='{:.4f}'.format(attr_value),
+                        struct='{:.4f}'.format(struct_value),
+                        jepa='{:.4f}'.format(jepa_value),
+                        resid='{:.4f}'.format(residual_value))
+                else:
+                    epoch_iter.set_postfix(loss='{:.6f}'.format(loss_value))
             elif self.verbose:
-                print('Epoch {:04d}: loss={:.6f}'.format(
-                    epoch + 1, loss_value))
+                if self.target_mode == 'feature':
+                    print('Epoch {:04d}: loss={:.6f} | attr={:.6f} | '
+                          'struct={:.6f} | jepa={:.6f} | residual={:.6f} | '
+                          'margin={:.6f}'.format(
+                              epoch + 1, loss_value, attr_value,
+                              struct_value, jepa_value, residual_value,
+                              margin_value))
+                else:
+                    print('Epoch {:04d}: loss={:.6f}'.format(
+                        epoch + 1, loss_value))
 
         self._fit_cache = inputs
         if self.verbose:
             print('CONADJEPA: computing final anomaly scores...')
         self.decision_score_ = self.decision_function(data)
+        if self.verbose and self.target_mode == 'feature':
+            print('CONADJEPA feature debug: final score mean={:.6f} '
+                  'std={:.6f} min={:.6f} max={:.6f}'.format(
+                      self.decision_score_.mean().item(),
+                      self.decision_score_.std(unbiased=False).item(),
+                      self.decision_score_.min().item(),
+                      self.decision_score_.max().item()))
         self._process_decision_score()
         return self
 
@@ -288,6 +328,19 @@ class CONADJEPA(Detector):
                 residual_all[node_indices] = residual.detach()
                 recon_all[node_indices] = recon.detach()
         score = self._zscore(residual_all) + self._zscore(recon_all)
+        if self.verbose and self.target_mode == 'feature':
+            print('CONADJEPA feature debug: residual mean={:.6f} '
+                  'std={:.6f} min={:.6f} max={:.6f}'.format(
+                      residual_all.mean().item(),
+                      residual_all.std(unbiased=False).item(),
+                      residual_all.min().item(),
+                      residual_all.max().item()))
+            print('CONADJEPA feature debug: reconstruction mean={:.6f} '
+                  'std={:.6f} min={:.6f} max={:.6f}'.format(
+                      recon_all.mean().item(),
+                      recon_all.std(unbiased=False).item(),
+                      recon_all.min().item(),
+                      recon_all.max().item()))
         return score.detach().cpu()
 
 
