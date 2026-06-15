@@ -191,7 +191,9 @@ class CONADJEPAModel(nn.Module):
 
     def __init__(self, in_dim, hid_dim=64, num_layers=2, dropout=0.0,
                  ppr_k=32, target_mode='ppr', ego_hops=1,
-                 fast_batch=True, context_mask_rate=1.0):
+                 fast_batch=True, context_mask_rate=1.0,
+                 attr_loss_weight=1.0, struct_loss_weight=1.0,
+                 jepa_loss_weight=1.0):
         super().__init__()
         self.context_encoder = NodeEncoder(in_dim, hid_dim, num_layers,
                                            dropout)
@@ -213,6 +215,9 @@ class CONADJEPAModel(nn.Module):
         self.ego_hops = ego_hops
         self.fast_batch = fast_batch
         self.context_mask_rate = context_mask_rate
+        self.attr_loss_weight = attr_loss_weight
+        self.struct_loss_weight = struct_loss_weight
+        self.jepa_loss_weight = jepa_loss_weight
         self.last_z_center = None
         self.last_z_all = None
 
@@ -412,11 +417,18 @@ class CONADJEPAModel(nn.Module):
         l_struct = self._structure_loss(z_c_center, self.last_z_all, a_hat,
                                         node_indices, edge_index)
 
-        total_loss = self.uncertainty_weighting([l_attr, l_struct, l_jepa])
+        weighted_attr = self.attr_loss_weight * l_attr
+        weighted_struct = self.struct_loss_weight * l_struct
+        weighted_jepa = self.jepa_loss_weight * l_jepa
+        total_loss = self.uncertainty_weighting([
+            weighted_attr, weighted_struct, weighted_jepa])
         logs = {
             'loss_attr': float(l_attr.detach().cpu()),
             'loss_struct': float(l_struct.detach().cpu()),
             'loss_jepa': float(l_jepa.detach().cpu()),
+            'weighted_attr': float(weighted_attr.detach().cpu()),
+            'weighted_struct': float(weighted_struct.detach().cpu()),
+            'weighted_jepa': float(weighted_jepa.detach().cpu()),
             'margin': float(m_adaptive.detach().cpu()),
         }
         return total_loss, residual, a_hat, x_hat, logs

@@ -44,6 +44,9 @@ class CONADJEPA(Detector):
                  grad_clip=5.0,
                  fast_batch=True,
                  context_mask_rate=1.0,
+                 attr_loss_weight=1.0,
+                 struct_loss_weight=1.0,
+                 jepa_loss_weight=1.0,
                  contamination=0.1,
                  device='cpu',
                  verbose=False,
@@ -67,6 +70,9 @@ class CONADJEPA(Detector):
         self.grad_clip = grad_clip
         self.fast_batch = fast_batch
         self.context_mask_rate = context_mask_rate
+        self.attr_loss_weight = attr_loss_weight
+        self.struct_loss_weight = struct_loss_weight
+        self.jepa_loss_weight = jepa_loss_weight
         self.device = torch.device(device)
         self.seed = seed
         self.model = None
@@ -214,7 +220,10 @@ class CONADJEPA(Detector):
             target_mode=self.target_mode,
             ego_hops=self.ego_hops,
             fast_batch=self.fast_batch,
-            context_mask_rate=self.context_mask_rate).to(self.device)
+            context_mask_rate=self.context_mask_rate,
+            attr_loss_weight=self.attr_loss_weight,
+            struct_loss_weight=self.struct_loss_weight,
+            jepa_loss_weight=self.jepa_loss_weight).to(self.device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         batch_size = self._resolve_batch_size(num_nodes)
@@ -231,6 +240,9 @@ class CONADJEPA(Detector):
             epoch_attr = 0.0
             epoch_struct = 0.0
             epoch_jepa = 0.0
+            epoch_w_attr = 0.0
+            epoch_w_struct = 0.0
+            epoch_w_jepa = 0.0
             epoch_margin = 0.0
             epoch_residual = 0.0
             for node_indices in loader:
@@ -253,6 +265,9 @@ class CONADJEPA(Detector):
                 epoch_attr += logs['loss_attr'] * batch_count
                 epoch_struct += logs['loss_struct'] * batch_count
                 epoch_jepa += logs['loss_jepa'] * batch_count
+                epoch_w_attr += logs['weighted_attr'] * batch_count
+                epoch_w_struct += logs['weighted_struct'] * batch_count
+                epoch_w_jepa += logs['weighted_jepa'] * batch_count
                 epoch_margin += logs['margin'] * batch_count
                 epoch_residual += residual.detach().mean().item() * \
                     batch_count
@@ -261,6 +276,9 @@ class CONADJEPA(Detector):
             attr_value = epoch_attr / num_nodes
             struct_value = epoch_struct / num_nodes
             jepa_value = epoch_jepa / num_nodes
+            w_attr_value = epoch_w_attr / num_nodes
+            w_struct_value = epoch_w_struct / num_nodes
+            w_jepa_value = epoch_w_jepa / num_nodes
             margin_value = epoch_margin / num_nodes
             residual_value = epoch_residual / num_nodes
             if self.verbose and trange is not None:
@@ -270,17 +288,22 @@ class CONADJEPA(Detector):
                         attr='{:.4f}'.format(attr_value),
                         struct='{:.4f}'.format(struct_value),
                         jepa='{:.4f}'.format(jepa_value),
-                        resid='{:.4f}'.format(residual_value))
+                        resid='{:.4f}'.format(residual_value),
+                        w_attr='{:.4f}'.format(w_attr_value),
+                        w_jepa='{:.4f}'.format(w_jepa_value))
                 else:
                     epoch_iter.set_postfix(loss='{:.6f}'.format(loss_value))
             elif self.verbose:
                 if self.target_mode == 'feature':
                     print('Epoch {:04d}: loss={:.6f} | attr={:.6f} | '
                           'struct={:.6f} | jepa={:.6f} | residual={:.6f} | '
-                          'margin={:.6f}'.format(
+                          'margin={:.6f} | weighted_attr={:.6f} | '
+                          'weighted_struct={:.6f} | weighted_jepa={:.6f}'
+                          .format(
                               epoch + 1, loss_value, attr_value,
                               struct_value, jepa_value, residual_value,
-                              margin_value))
+                              margin_value, w_attr_value, w_struct_value,
+                              w_jepa_value))
                 else:
                     print('Epoch {:04d}: loss={:.6f}'.format(
                         epoch + 1, loss_value))

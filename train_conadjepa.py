@@ -30,6 +30,9 @@ def main():
     parser.add_argument('--ppr-k', type=int, default=32)
     parser.add_argument('--grad-clip', type=float, default=5.0)
     parser.add_argument('--context-mask-rate', type=float, default=1.0)
+    parser.add_argument('--attr-loss-weight', type=float, default=1.0)
+    parser.add_argument('--struct-loss-weight', type=float, default=1.0)
+    parser.add_argument('--jepa-loss-weight', type=float, default=1.0)
     parser.add_argument('--exact-subgraph', action='store_true',
                         help='Use slower per-node subgraph extraction.')
     args = parser.parse_args()
@@ -44,6 +47,9 @@ def main():
                       ppr_k=args.ppr_k,
                       grad_clip=args.grad_clip,
                       context_mask_rate=args.context_mask_rate,
+                      attr_loss_weight=args.attr_loss_weight,
+                      struct_loss_weight=args.struct_loss_weight,
+                      jepa_loss_weight=args.jepa_loss_weight,
                       fast_batch=not args.exact_subgraph)
     model.fit(data)
 
