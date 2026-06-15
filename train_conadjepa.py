@@ -30,6 +30,11 @@ def main():
     parser.add_argument('--ppr-k', type=int, default=32)
     parser.add_argument('--grad-clip', type=float, default=5.0)
     parser.add_argument('--context-mask-rate', type=float, default=1.0)
+    parser.add_argument('--mask-nodes-per-epoch', type=int, default=512,
+                        help='For ppr/ego/clean-gcn fast mode, sample this '
+                             'many masked center nodes per epoch in one '
+                             'full-graph pass. Use 0 to go back to '
+                             'mini-batch masking.')
     parser.add_argument('--refresh-anomaly-every', type=int, default=1,
                         help='Refresh pseudo anomaly view every N epochs. '
                              'Use 0 to keep one fixed view.')
@@ -53,6 +58,7 @@ def main():
                       ppr_k=args.ppr_k,
                       grad_clip=args.grad_clip,
                       context_mask_rate=args.context_mask_rate,
+                      mask_nodes_per_epoch=args.mask_nodes_per_epoch,
                       refresh_anomaly_every=args.refresh_anomaly_every,
                       attr_loss_weight=args.attr_loss_weight,
                       struct_loss_weight=args.struct_loss_weight,

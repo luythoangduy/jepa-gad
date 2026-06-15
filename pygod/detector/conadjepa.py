@@ -48,6 +48,7 @@ class CONADJEPA(Detector):
                  struct_loss_weight=1.0,
                  jepa_loss_weight=1.0,
                  struct_row_all=True,
+                 mask_nodes_per_epoch=512,
                  contamination=0.1,
                  device='cpu',
                  verbose=False,
@@ -76,6 +77,7 @@ class CONADJEPA(Detector):
         self.struct_loss_weight = struct_loss_weight
         self.jepa_loss_weight = jepa_loss_weight
         self.struct_row_all = struct_row_all
+        self.mask_nodes_per_epoch = mask_nodes_per_epoch
         self.device = torch.device(device)
         self.seed = seed
         self.model = None
@@ -172,6 +174,14 @@ class CONADJEPA(Detector):
             min=1e-12)
 
     def _resolve_batch_size(self, num_nodes, scoring=False):
+        if scoring and self.batch_size == 0 and self.fast_batch and \
+                self.target_mode in ('ppr', 'ego', 'clean-gcn'):
+            return min(512, num_nodes)
+        if self.batch_size == 0 and self.fast_batch and \
+                self.target_mode in ('ppr', 'ego', 'clean-gcn') and \
+                self.mask_nodes_per_epoch and \
+                self.mask_nodes_per_epoch > 0:
+            return num_nodes
         if self.batch_size == 0 and self.fast_batch and \
                 self.target_mode in ('ppr', 'ego', 'clean-gcn') and \
                 (self.context_mask_rate >= 1.0 or scoring):
@@ -241,7 +251,8 @@ class CONADJEPA(Detector):
             attr_loss_weight=self.attr_loss_weight,
             struct_loss_weight=self.struct_loss_weight,
             jepa_loss_weight=self.jepa_loss_weight,
-            struct_row_all=self.struct_row_all).to(self.device)
+            struct_row_all=self.struct_row_all,
+            mask_nodes_per_epoch=self.mask_nodes_per_epoch).to(self.device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         batch_size = self._resolve_batch_size(num_nodes)
@@ -268,6 +279,7 @@ class CONADJEPA(Detector):
             epoch_w_jepa = 0.0
             epoch_margin = 0.0
             epoch_residual = 0.0
+            epoch_count = 0
             for node_indices in loader:
                 node_indices = node_indices.to(self.device)
                 optimizer.zero_grad()
@@ -296,17 +308,19 @@ class CONADJEPA(Detector):
                 epoch_margin += logs['margin'] * batch_count
                 epoch_residual += residual.detach().mean().item() * \
                     batch_count
+                epoch_count += batch_count
 
-            loss_value = epoch_loss / num_nodes
-            attr_value = epoch_attr / num_nodes
-            struct_value = epoch_struct / num_nodes
-            jepa_value = epoch_jepa / num_nodes
-            feature_online_value = epoch_feature_online / num_nodes
-            w_attr_value = epoch_w_attr / num_nodes
-            w_struct_value = epoch_w_struct / num_nodes
-            w_jepa_value = epoch_w_jepa / num_nodes
-            margin_value = epoch_margin / num_nodes
-            residual_value = epoch_residual / num_nodes
+            denom = max(1, epoch_count)
+            loss_value = epoch_loss / denom
+            attr_value = epoch_attr / denom
+            struct_value = epoch_struct / denom
+            jepa_value = epoch_jepa / denom
+            feature_online_value = epoch_feature_online / denom
+            w_attr_value = epoch_w_attr / denom
+            w_struct_value = epoch_w_struct / denom
+            w_jepa_value = epoch_w_jepa / denom
+            margin_value = epoch_margin / denom
+            residual_value = epoch_residual / denom
             if self.verbose and trange is not None:
                 if self.target_mode == 'feature':
                     epoch_iter.set_postfix(

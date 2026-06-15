@@ -207,7 +207,8 @@ class CONADJEPAModel(nn.Module):
                  ppr_k=32, target_mode='ppr', ego_hops=1,
                  fast_batch=True, context_mask_rate=1.0,
                  attr_loss_weight=1.0, struct_loss_weight=1.0,
-                 jepa_loss_weight=1.0, struct_row_all=True):
+                 jepa_loss_weight=1.0, struct_row_all=True,
+                 mask_nodes_per_epoch=512):
         super().__init__()
         self.context_encoder = NodeEncoder(in_dim, hid_dim, num_layers,
                                            dropout)
@@ -234,6 +235,7 @@ class CONADJEPAModel(nn.Module):
         self.struct_loss_weight = struct_loss_weight
         self.jepa_loss_weight = jepa_loss_weight
         self.struct_row_all = struct_row_all
+        self.mask_nodes_per_epoch = mask_nodes_per_epoch
         self.last_z_center = None
         self.last_z_all = None
         self.last_z_struct_center = None
@@ -361,7 +363,14 @@ class CONADJEPAModel(nn.Module):
                 z_t_center = self.feature_target_encoder(x[node_indices])
             z_t_online = self.feature_encoder(x[node_indices])
         elif self.fast_batch:
-            if self.training and self.context_mask_rate < 1.0:
+            if self.training and self.mask_nodes_per_epoch and \
+                    self.mask_nodes_per_epoch > 0 and \
+                    node_indices.numel() > self.mask_nodes_per_epoch:
+                perm = torch.randperm(node_indices.numel(),
+                                      device=x.device)
+                active_indices = node_indices[
+                    perm[:self.mask_nodes_per_epoch]]
+            elif self.training and self.context_mask_rate < 1.0:
                 mask_prob = torch.rand(node_indices.shape[0],
                                        device=x.device)
                 keep = mask_prob < self.context_mask_rate
