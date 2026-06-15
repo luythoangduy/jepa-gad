@@ -15,6 +15,11 @@ from pygod.detector import CONAD, CONADJEPA, DOMINANT
 from pygod.metric import eval_average_precision, eval_roc_auc
 from pygod.utils import load_data
 
+try:
+    from tqdm.auto import tqdm
+except ImportError:
+    tqdm = None
+
 
 DATASETS = ['inj_cora', 'inj_amazon', 'weibo', 'reddit']
 SEEDS = [0, 1, 2, 3, 4]
@@ -54,15 +59,25 @@ def evaluate_method(method, dataset, args):
     """Evaluate one method on one dataset over all seeds."""
     aucs = []
     aps = []
+    print(f'Loading dataset={dataset} for method={method}...')
     data = load_data(dataset)
     labels = data.y.bool().long().numpy()
-    for seed in SEEDS:
+    if tqdm is not None:
+        seed_iter = tqdm(SEEDS, desc=f'{method} on {dataset}', leave=False)
+    else:
+        seed_iter = SEEDS
+    for seed in seed_iter:
+        print(f'Running method={method} dataset={dataset} seed={seed}...')
         set_seed(seed)
         model = build_model(method, seed, args)
         model.fit(data)
         score = model.decision_score_
-        aucs.append(eval_roc_auc(labels, score))
-        aps.append(eval_average_precision(labels, score))
+        auc = eval_roc_auc(labels, score)
+        ap = eval_average_precision(labels, score)
+        aucs.append(auc)
+        aps.append(ap)
+        print(f'Finished method={method} dataset={dataset} seed={seed}: '
+              f'AUC={auc:.4f} AP={ap:.4f}')
     return np.mean(aucs), np.std(aucs), np.mean(aps), np.std(aps)
 
 
@@ -88,9 +103,14 @@ def main():
 
     methods = ['DOMINANT', 'CONAD', 'CONAD-JEPA']
     results = {}
+    total_jobs = len(methods) * len(DATASETS)
+    job_id = 0
     for method in methods:
         results[method] = {}
         for dataset in DATASETS:
+            job_id += 1
+            print(f'[{job_id}/{total_jobs}] Evaluating {method} on '
+                  f'{dataset}...')
             results[method][dataset] = evaluate_method(method, dataset, args)
 
     header = 'Method       | inj_cora | inj_amazon | weibo | reddit'
