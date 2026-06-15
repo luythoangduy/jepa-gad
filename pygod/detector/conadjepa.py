@@ -38,7 +38,7 @@ class CONADJEPA(Detector):
                  ppr_iter=10,
                  anomaly_ratio=0.1,
                  ema_momentum=0.99,
-                 target_mode='ppr',
+                 target_mode='feature',
                  ego_hops=1,
                  grad_clip=5.0,
                  fast_batch=True,
@@ -111,18 +111,20 @@ class CONADJEPA(Detector):
                 print('CONADJEPA: extracting top-k PPR neighbors...')
             k = min(self.ppr_k, num_nodes)
             topk_values, topk_indices = torch.topk(pi, k=k, dim=1)
-        elif self.target_mode in ('ego', 'feature'):
+        elif self.target_mode in ('ego', 'feature', 'clean-gcn'):
             if self.verbose:
                 if self.target_mode == 'ego':
                     print('CONADJEPA: using ego-graph target view...')
-                else:
+                elif self.target_mode == 'feature':
                     print('CONADJEPA: using feature-only target view...')
+                else:
+                    print('CONADJEPA: using clean-GCN target view...')
             pi = torch.empty((0, 0), dtype=torch.float32)
             topk_indices = torch.empty((num_nodes, 0), dtype=torch.long)
             topk_values = torch.empty((num_nodes, 0), dtype=torch.float32)
         else:
             raise ValueError("target_mode must be 'ppr', 'ego', "
-                             "or 'feature'.")
+                             "'feature', or 'clean-gcn'.")
 
         x = x_cpu.to(self.device)
         edge_index = edge_index_cpu.to(self.device)
@@ -171,7 +173,7 @@ class CONADJEPA(Detector):
 
     def _resolve_batch_size(self, num_nodes, scoring=False):
         if self.batch_size == 0 and self.fast_batch and \
-                self.target_mode in ('ppr', 'ego') and \
+                self.target_mode in ('ppr', 'ego', 'clean-gcn') and \
                 (self.context_mask_rate >= 1.0 or scoring):
             return min(512, num_nodes)
         if self.batch_size == 0:

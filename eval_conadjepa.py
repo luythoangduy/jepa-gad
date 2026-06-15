@@ -102,8 +102,8 @@ def main():
                         help="'cpu' or CUDA device index such as '0'.")
     parser.add_argument('--epoch', type=int, default=100)
     parser.add_argument('--batch-size', type=int, default=0)
-    parser.add_argument('--conadjepa-target-mode', default='ppr',
-                        choices=['ppr', 'ego', 'feature'])
+    parser.add_argument('--conadjepa-target-mode', default='feature',
+                        choices=['ppr', 'ego', 'feature', 'clean-gcn'])
     parser.add_argument('--ego-hops', type=int, default=1)
     parser.add_argument('--ppr-k', type=int, default=32)
     parser.add_argument('--grad-clip', type=float, default=5.0)

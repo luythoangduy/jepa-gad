@@ -253,6 +253,10 @@ class CONADJEPAModel(nn.Module):
         if self.target_mode == 'feature':
             return self.feature_target_encoder(x[v].view(1, -1)).squeeze(0)
 
+        if self.target_mode == 'clean-gcn':
+            z_t = self.target_encoder(x, edge_index)
+            return z_t[v]
+
         if self.target_mode == 'ego':
             subset, edge_index_sub, mapping, _ = k_hop_subgraph(
                 int(v), self.ego_hops, edge_index, relabel_nodes=True,
@@ -299,6 +303,10 @@ class CONADJEPAModel(nn.Module):
                 topk_indices, topk_values)
             z_target_all = self.target_encoder(x, ppr_edge_index,
                                                ppr_edge_weight)
+            return z_target_all[node_indices]
+
+        if self.target_mode == 'clean-gcn':
+            z_target_all = self.target_encoder(x, edge_index)
             return z_target_all[node_indices]
 
         z_target_all = self.target_encoder(x, edge_index)
