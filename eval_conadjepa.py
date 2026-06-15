@@ -29,21 +29,28 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def build_model(method, seed, device):
+def build_model(method, seed, args):
     """Create a detector for a named method."""
     if method == 'DOMINANT':
-        gpu = -1 if device == 'cpu' else int(device)
+        gpu = -1 if args.device == 'cpu' else int(args.device)
         return DOMINANT(gpu=gpu)
     if method == 'CONAD':
-        gpu = -1 if device == 'cpu' else int(device)
+        gpu = -1 if args.device == 'cpu' else int(args.device)
         return CONAD(gpu=gpu)
     if method == 'CONAD-JEPA':
-        return CONADJEPA(device='cpu' if device == 'cpu'
-                        else f'cuda:{device}', seed=seed)
+        return CONADJEPA(device='cpu' if args.device == 'cpu'
+                        else f'cuda:{args.device}',
+                        seed=seed,
+                        epoch=args.epoch,
+                        target_mode=args.conadjepa_target_mode,
+                        ego_hops=args.ego_hops,
+                        ppr_k=args.ppr_k,
+                        grad_clip=args.grad_clip,
+                        verbose=args.verbose)
     raise ValueError(method)
 
 
-def evaluate_method(method, dataset, device):
+def evaluate_method(method, dataset, args):
     """Evaluate one method on one dataset over all seeds."""
     aucs = []
     aps = []
@@ -51,7 +58,7 @@ def evaluate_method(method, dataset, device):
     labels = data.y.numpy()
     for seed in SEEDS:
         set_seed(seed)
-        model = build_model(method, seed, device)
+        model = build_model(method, seed, args)
         model.fit(data)
         score = model.decision_score_
         aucs.append(eval_roc_auc(labels, score))
@@ -70,6 +77,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--device', default='cpu',
                         help="'cpu' or CUDA device index such as '0'.")
+    parser.add_argument('--epoch', type=int, default=100)
+    parser.add_argument('--conadjepa-target-mode', default='ppr',
+                        choices=['ppr', 'ego', 'feature'])
+    parser.add_argument('--ego-hops', type=int, default=1)
+    parser.add_argument('--ppr-k', type=int, default=32)
+    parser.add_argument('--grad-clip', type=float, default=5.0)
+    parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
 
     methods = ['DOMINANT', 'CONAD', 'CONAD-JEPA']
@@ -77,8 +91,7 @@ def main():
     for method in methods:
         results[method] = {}
         for dataset in DATASETS:
-            results[method][dataset] = evaluate_method(method, dataset,
-                                                       args.device)
+            results[method][dataset] = evaluate_method(method, dataset, args)
 
     header = 'Method       | inj_cora | inj_amazon | weibo | reddit'
     sep = '-------------|----------|------------|-------|-------'
