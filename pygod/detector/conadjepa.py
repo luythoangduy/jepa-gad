@@ -42,6 +42,7 @@ class CONADJEPA(Detector):
                  target_mode='ppr',
                  ego_hops=1,
                  grad_clip=5.0,
+                 fast_batch=True,
                  contamination=0.1,
                  device='cpu',
                  verbose=False,
@@ -63,6 +64,7 @@ class CONADJEPA(Detector):
         self.target_mode = target_mode
         self.ego_hops = ego_hops
         self.grad_clip = grad_clip
+        self.fast_batch = fast_batch
         self.device = torch.device(device)
         self.seed = seed
         self.model = None
@@ -167,10 +169,14 @@ class CONADJEPA(Detector):
             dropout=self.dropout,
             ppr_k=self.ppr_k,
             target_mode=self.target_mode,
-            ego_hops=self.ego_hops).to(self.device)
+            ego_hops=self.ego_hops,
+            fast_batch=self.fast_batch).to(self.device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
-        if self.batch_size == 0:
+        if self.batch_size == 0 and self.fast_batch and \
+                self.target_mode in ('ppr', 'ego'):
+            batch_size = min(512, num_nodes)
+        elif self.batch_size == 0:
             batch_size = num_nodes
         else:
             batch_size = self.batch_size

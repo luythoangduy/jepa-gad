@@ -190,7 +190,8 @@ class CONADJEPAModel(nn.Module):
     """CONAD with JEPA-style latent prediction and PPR targets."""
 
     def __init__(self, in_dim, hid_dim=64, num_layers=2, dropout=0.0,
-                 ppr_k=32, target_mode='ppr', ego_hops=1):
+                 ppr_k=32, target_mode='ppr', ego_hops=1,
+                 fast_batch=True):
         super().__init__()
         self.context_encoder = NodeEncoder(in_dim, hid_dim, num_layers,
                                            dropout)
@@ -208,6 +209,7 @@ class CONADJEPAModel(nn.Module):
         self.ppr_k = ppr_k
         self.target_mode = target_mode
         self.ego_hops = ego_hops
+        self.fast_batch = fast_batch
 
     def _context_center(self, v, x_ano, edge_index_ano):
         subset, edge_index_ctx, mapping, _ = k_hop_subgraph(
@@ -248,6 +250,31 @@ class CONADJEPAModel(nn.Module):
         z_t = self.target_encoder(x_sub, edge_index_sub, edge_weight)
         return z_t[center_idx]
 
+    @staticmethod
+    def _build_ppr_edges(topk_indices, topk_values):
+        num_nodes, k = topk_indices.shape
+        target = torch.arange(num_nodes, device=topk_indices.device)
+        target = target.view(-1, 1).expand(-1, k).reshape(-1)
+        source = topk_indices.reshape(-1)
+        edge_index = torch.stack([source, target], dim=0)
+        edge_weight = topk_values.reshape(-1)
+        return edge_index, edge_weight
+
+    def _fast_target_centers(self, x, edge_index, topk_indices, topk_values,
+                             node_indices):
+        if self.target_mode == 'feature':
+            return self.feature_target_encoder(x[node_indices])
+
+        if self.target_mode == 'ppr':
+            ppr_edge_index, ppr_edge_weight = self._build_ppr_edges(
+                topk_indices, topk_values)
+            z_target_all = self.target_encoder(x, ppr_edge_index,
+                                               ppr_edge_weight)
+            return z_target_all[node_indices]
+
+        z_target_all = self.target_encoder(x, edge_index)
+        return z_target_all[node_indices]
+
     def forward(self, x, edge_index, x_ano, edge_index_ano, Pi,
                 topk_indices, topk_values, y_pseudo, node_indices=None):
         """Compute CONAD-JEPA loss and reconstruction outputs."""
@@ -259,6 +286,15 @@ class CONADJEPAModel(nn.Module):
             z_context_all = self.context_encoder(x_ano, edge_index_ano)
             z_c_center = z_context_all[node_indices]
             z_t_center = self.feature_target_encoder(x[node_indices])
+        elif self.fast_batch:
+            x_ctx = x_ano.clone()
+            x_ctx[node_indices] = 0.0
+            z_context_all = self.context_encoder(x_ctx, edge_index_ano)
+            z_c_center = z_context_all[node_indices]
+            with torch.no_grad():
+                z_t_center = self._fast_target_centers(
+                    x, edge_index, topk_indices, topk_values,
+                    node_indices)
         else:
             z_c_center = torch.stack([
                 self._context_center(v, x_ano, edge_index_ano)

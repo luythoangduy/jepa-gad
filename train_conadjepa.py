@@ -23,21 +23,26 @@ def main():
                                  'reddit'])
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--epoch', type=int, default=100)
+    parser.add_argument('--batch-size', type=int, default=0)
     parser.add_argument('--target-mode', default='ppr',
                         choices=['ppr', 'ego', 'feature'])
     parser.add_argument('--ego-hops', type=int, default=1)
     parser.add_argument('--ppr-k', type=int, default=32)
     parser.add_argument('--grad-clip', type=float, default=5.0)
+    parser.add_argument('--exact-subgraph', action='store_true',
+                        help='Use slower per-node subgraph extraction.')
     args = parser.parse_args()
 
     data = load_data(args.dataset)
     model = CONADJEPA(device=args.device,
                       verbose=True,
                       epoch=args.epoch,
+                      batch_size=args.batch_size,
                       target_mode=args.target_mode,
                       ego_hops=args.ego_hops,
                       ppr_k=args.ppr_k,
-                      grad_clip=args.grad_clip)
+                      grad_clip=args.grad_clip,
+                      fast_batch=not args.exact_subgraph)
     model.fit(data)
 
     score = model.decision_score_

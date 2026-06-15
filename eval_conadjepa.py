@@ -51,6 +51,8 @@ def build_model(method, seed, args):
                         ego_hops=args.ego_hops,
                         ppr_k=args.ppr_k,
                         grad_clip=args.grad_clip,
+                        batch_size=args.batch_size,
+                        fast_batch=not args.exact_subgraph,
                         verbose=args.verbose)
     raise ValueError(method)
 
@@ -93,12 +95,15 @@ def main():
     parser.add_argument('--device', default='cpu',
                         help="'cpu' or CUDA device index such as '0'.")
     parser.add_argument('--epoch', type=int, default=100)
+    parser.add_argument('--batch-size', type=int, default=0)
     parser.add_argument('--conadjepa-target-mode', default='ppr',
                         choices=['ppr', 'ego', 'feature'])
     parser.add_argument('--ego-hops', type=int, default=1)
     parser.add_argument('--ppr-k', type=int, default=32)
     parser.add_argument('--grad-clip', type=float, default=5.0)
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--exact-subgraph', action='store_true',
+                        help='Use slower per-node subgraph extraction.')
     args = parser.parse_args()
 
     methods = ['DOMINANT', 'CONAD', 'CONAD-JEPA']
