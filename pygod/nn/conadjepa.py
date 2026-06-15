@@ -15,14 +15,20 @@ from torch_geometric.nn import GCNConv
 
 
 def inject_anomalies(x, edge_index, num_nodes, anomaly_ratio=0.1, seed=42):
-    """Inject CONAD-style pseudo anomalies into a graph.
+    """Inject CONAD-style pseudo anomalies into a graph (vectorized).
+
+    Four augmentation types (each ~25% of selected nodes):
+        0: Add random edges (high-degree)
+        1: Remove most edges (outlying)
+        2: Replace features with distant node (deviated)
+        3: Scale features by 10x or 0.1x (disproportionate)
 
     Parameters
     ----------
     x : torch.Tensor
-        Node feature matrix.
+        Node feature matrix of shape ``[N, F]``.
     edge_index : torch.Tensor
-        Edge indices with shape ``[2, num_edges]``.
+        Edge indices with shape ``[2, E]``.
     num_nodes : int
         Number of nodes.
     anomaly_ratio : float, optional
@@ -37,69 +43,81 @@ def inject_anomalies(x, edge_index, num_nodes, anomaly_ratio=0.1, seed=42):
     """
     generator = torch.Generator(device=x.device)
     generator.manual_seed(seed)
-    rng = random.Random(seed)
 
     x_ano = x.clone()
-    edges = edge_index.clone()
     y_pseudo = torch.zeros(num_nodes, dtype=torch.long, device=x.device)
     num_anomalies = max(1, int(anomaly_ratio * num_nodes))
     selected = torch.randperm(num_nodes, generator=generator,
                               device=x.device)[:num_anomalies]
     y_pseudo[selected] = 1
 
-    edge_list = edges.t().tolist()
-    existing = {tuple(edge) for edge in edge_list}
-    remove_edges = set()
+    # Assign augmentation types
+    aug_types = torch.randint(0, 4, (num_anomalies,),
+                              generator=generator, device=x.device)
 
-    for node_tensor in selected:
-        node = int(node_tensor.item())
-        aug_type = rng.randrange(4)
+    # --- Type 2: deviated features (independent candidates per node) ---
+    type2_nodes = selected[aug_types == 2]
+    if type2_nodes.numel() > 0:
+        sample_size = min(50, num_nodes)
+        # rand_idx: [n_type2, sample_size]
+        rand_idx = torch.randint(0, num_nodes,
+                                 (type2_nodes.shape[0], sample_size),
+                                 generator=generator, device=x.device)
+        x_candidates = x[rand_idx]  # [n_type2, sample_size, F]
+        x_target = x[type2_nodes].unsqueeze(1)  # [n_type2, 1, F]
+        dist = torch.norm(x_target - x_candidates, dim=2)  # [n_type2, sample_size]
+        farthest = torch.argmax(dist, dim=1)  # [n_type2]
+        farthest_idx = rand_idx[torch.arange(type2_nodes.shape[0]), farthest]
+        x_ano[type2_nodes] = x[farthest_idx]
 
-        if aug_type == 0:
-            candidates = torch.randperm(num_nodes, generator=generator,
-                                        device=x.device)
-            added = 0
-            for dst_tensor in candidates:
-                dst = int(dst_tensor.item())
-                if dst == node or (node, dst) in existing:
-                    continue
-                edge_list.append([node, dst])
-                edge_list.append([dst, node])
-                existing.add((node, dst))
-                existing.add((dst, node))
-                added += 1
-                if added >= min(10, max(1, num_nodes // 20)):
-                    break
+    # --- Type 3: disproportionate (vectorized scale) ---
+    type3_nodes = selected[aug_types == 3]
+    if type3_nodes.numel() > 0:
+        coin = torch.rand(type3_nodes.shape[0], generator=generator,
+                          device=x.device)
+        scales = torch.where(coin < 0.5,
+                             torch.tensor(10.0, device=x.device),
+                             torch.tensor(0.1, device=x.device))
+        x_ano[type3_nodes] = x_ano[type3_nodes] * scales.unsqueeze(1)
 
-        elif aug_type == 1:
-            incident = [
-                i for i, (src, dst) in enumerate(edge_list)
-                if src == node or dst == node
-            ]
-            keep = set(rng.sample(incident, k=1)) if incident else set()
-            remove_edges.update(i for i in incident if i not in keep)
+    # --- Type 0: add random edges (vectorized) ---
+    type0_nodes = selected[aug_types == 0]
+    new_edges_parts = []
+    if type0_nodes.numel() > 0:
+        num_to_add = min(10, max(1, num_nodes // 20))
+        # For each type0 node, sample num_to_add random destinations
+        rand_dsts = torch.randint(0, num_nodes,
+                                  (type0_nodes.shape[0], num_to_add),
+                                  generator=generator, device=x.device)
+        src_expand = type0_nodes.unsqueeze(1).expand_as(rand_dsts)
+        # Forward edges: src -> dst
+        fwd_src = src_expand.reshape(-1)
+        fwd_dst = rand_dsts.reshape(-1)
+        # Remove self-loops
+        not_self = fwd_src != fwd_dst
+        fwd_src = fwd_src[not_self]
+        fwd_dst = fwd_dst[not_self]
+        # Add both directions
+        new_src = torch.cat([fwd_src, fwd_dst])
+        new_dst = torch.cat([fwd_dst, fwd_src])
+        new_edges_parts.append(torch.stack([new_src, new_dst], dim=0))
 
-        elif aug_type == 2:
-            sample_size = min(50, num_nodes)
-            candidates = torch.randperm(num_nodes, generator=generator,
-                                        device=x.device)[:sample_size]
-            dist = torch.norm(x[node].view(1, -1) - x[candidates], dim=1)
-            x_ano[node] = x[candidates[torch.argmax(dist)]]
-
-        else:
-            scale = 10.0 if rng.random() < 0.5 else 0.1
-            x_ano[node] = x_ano[node] * scale
-
-    if remove_edges:
-        edge_list = [edge for i, edge in enumerate(edge_list)
-                     if i not in remove_edges]
-
-    if edge_list:
-        edge_index_ano = torch.tensor(edge_list, dtype=torch.long,
-                                      device=x.device).t().contiguous()
+    # --- Type 1: remove edges (vectorized boolean mask) ---
+    type1_nodes = selected[aug_types == 1]
+    if type1_nodes.numel() > 0:
+        # Remove all edges incident to type1 nodes
+        incident = (torch.isin(edge_index[0], type1_nodes) |
+                    torch.isin(edge_index[1], type1_nodes))
+        edge_index_kept = edge_index[:, ~incident]
     else:
-        edge_index_ano = torch.empty((2, 0), dtype=torch.long,
-                                     device=x.device)
+        edge_index_kept = edge_index
+
+    # --- Assemble final edge_index and remove duplicates ---
+    parts = [edge_index_kept]
+    parts.extend(new_edges_parts)
+    edge_index_ano = torch.cat(parts, dim=1)
+    edge_index_ano = torch.unique(edge_index_ano, dim=1)
+
     return x_ano, edge_index_ano, y_pseudo
 
 
