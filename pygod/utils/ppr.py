@@ -41,7 +41,7 @@ def compute_ppr(edge_index, num_nodes, alpha=0.15, num_iter=10):
     eye = torch.eye(num_nodes, dtype=dtype, device=device)
     pi = eye.clone()
     for _ in range(num_iter):
-        pi = (1.0 - alpha) * eye + alpha * norm_adj.t().matmul(pi)
+        pi = alpha * eye + (1.0 - alpha) * norm_adj.t().matmul(pi)
     return pi
 
 

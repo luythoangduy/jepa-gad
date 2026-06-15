@@ -16,7 +16,7 @@ def main(args):
         model = init_model(args)
         data = load_data(args.dataset)
 
-        if args.model == 'iforest' or args.model == 'lof':
+        if args.model == 'if' or args.model == 'lof':
             model.fit(data.x)
             score = model.decision_function(data.x)
         else:

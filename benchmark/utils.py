@@ -23,7 +23,7 @@ def init_model(args):
     model_name = args.model
     gpu = args.gpu
 
-    if hasattr(args, 'epoch'):
+    if hasattr(args, 'epoch') and args.epoch is not None:
         epoch = args.epoch
 
     if args.dataset == 'reddit':
