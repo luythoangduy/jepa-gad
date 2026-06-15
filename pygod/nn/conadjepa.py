@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
-from torch_geometric.utils import k_hop_subgraph, subgraph
+from torch_geometric.utils import k_hop_subgraph
 
 
 def inject_anomalies(x, edge_index, num_nodes, anomaly_ratio=0.1, seed=42):
@@ -203,6 +203,8 @@ class CONADJEPAModel(nn.Module):
             nn.PReLU(),
             nn.Linear(hid_dim, hid_dim),
         )
+        for param in self.feature_target_encoder.parameters():
+            param.requires_grad = False
         self.predictor = Predictor(hid_dim, hid_dim, hid_dim)
         self.decoder = Decoder(hid_dim, in_dim)
         self.uncertainty_weighting = UncertaintyWeighting(num_tasks=3)
@@ -211,6 +213,8 @@ class CONADJEPAModel(nn.Module):
         self.ego_hops = ego_hops
         self.fast_batch = fast_batch
         self.context_mask_rate = context_mask_rate
+        self.last_z_center = None
+        self.last_z_all = None
 
     def _context_center(self, v, x_ano, edge_index_ano):
         subset, edge_index_ctx, mapping, _ = k_hop_subgraph(
@@ -241,13 +245,13 @@ class CONADJEPAModel(nn.Module):
             nodes[-1] = v
             values[-1] = values.max()
 
-        edge_index_sub, _ = subgraph(nodes, edge_index, relabel_nodes=True)
         x_sub = x[nodes]
         center_idx = torch.nonzero(nodes == v, as_tuple=False)[0].item()
         weights = values / values.sum().clamp(min=1e-12)
-        edge_weight = None
-        if edge_index_sub.numel() > 0:
-            edge_weight = weights[edge_index_sub[1]]
+        source = torch.arange(nodes.shape[0], device=x.device)
+        target = torch.full_like(source, center_idx)
+        edge_index_sub = torch.stack([source, target], dim=0)
+        edge_weight = weights.to(x.device)
         z_t = self.target_encoder(x_sub, edge_index_sub, edge_weight)
         return z_t[center_idx]
 
@@ -264,7 +268,8 @@ class CONADJEPAModel(nn.Module):
     def _fast_target_centers(self, x, edge_index, topk_indices, topk_values,
                              node_indices):
         if self.target_mode == 'feature':
-            return self.feature_target_encoder(x[node_indices])
+            with torch.no_grad():
+                return self.feature_target_encoder(x[node_indices])
 
         if self.target_mode == 'ppr':
             ppr_edge_index, ppr_edge_weight = self._build_ppr_edges(
@@ -276,6 +281,53 @@ class CONADJEPAModel(nn.Module):
         z_target_all = self.target_encoder(x, edge_index)
         return z_target_all[node_indices]
 
+    def _structure_loss(self, z_center, z_all, a_hat, node_indices,
+                        edge_index):
+        if z_all is None:
+            pos_mask = torch.isin(edge_index[0], node_indices) & \
+                torch.isin(edge_index[1], node_indices)
+            if not torch.any(pos_mask):
+                return a_hat.new_tensor(0.0)
+            local = {int(node): i for i, node in enumerate(
+                node_indices.tolist())}
+            rows = torch.tensor([local[int(n)] for n in
+                                 edge_index[0, pos_mask].tolist()],
+                                device=z_center.device)
+            cols = torch.tensor([local[int(n)] for n in
+                                 edge_index[1, pos_mask].tolist()],
+                                device=z_center.device)
+            pos_pred = a_hat[rows, cols]
+            neg_rows = torch.randint(0, z_center.shape[0], rows.shape,
+                                     device=z_center.device)
+            neg_cols = torch.randint(0, z_center.shape[0], cols.shape,
+                                     device=z_center.device)
+            neg_pred = a_hat[neg_rows, neg_cols]
+        else:
+            pos_mask = torch.isin(edge_index[0], node_indices)
+            if not torch.any(pos_mask):
+                return z_center.new_tensor(0.0)
+            local = {int(node): i for i, node in enumerate(
+                node_indices.tolist())}
+            rows = torch.tensor([local[int(n)] for n in
+                                 edge_index[0, pos_mask].tolist()],
+                                device=z_center.device)
+            cols = edge_index[1, pos_mask]
+            pos_pred = torch.sigmoid((z_center[rows] * z_all[cols]).sum(1))
+            neg_rows = torch.randint(0, z_center.shape[0], rows.shape,
+                                     device=z_center.device)
+            neg_cols = torch.randint(0, z_all.shape[0], cols.shape,
+                                     device=z_center.device)
+            neg_pred = torch.sigmoid(
+                (z_center[neg_rows] * z_all[neg_cols]).sum(1))
+
+        pos_loss = F.binary_cross_entropy(
+            pos_pred.clamp(1e-6, 1.0 - 1e-6),
+            torch.ones_like(pos_pred))
+        neg_loss = F.binary_cross_entropy(
+            neg_pred.clamp(1e-6, 1.0 - 1e-6),
+            torch.zeros_like(neg_pred))
+        return pos_loss + neg_loss
+
     def forward(self, x, edge_index, x_ano, edge_index_ano, Pi,
                 topk_indices, topk_values, y_pseudo, node_indices=None):
         """Compute CONAD-JEPA loss and reconstruction outputs."""
@@ -286,7 +338,8 @@ class CONADJEPAModel(nn.Module):
         if self.target_mode == 'feature':
             z_context_all = self.context_encoder(x_ano, edge_index_ano)
             z_c_center = z_context_all[node_indices]
-            z_t_center = self.feature_target_encoder(x[node_indices])
+            with torch.no_grad():
+                z_t_center = self.feature_target_encoder(x[node_indices])
         elif self.fast_batch:
             if self.training and self.context_mask_rate < 1.0:
                 mask_prob = torch.rand(node_indices.shape[0],
@@ -322,6 +375,9 @@ class CONADJEPAModel(nn.Module):
 
         pred = self.predictor(z_c_center)
         a_hat, x_hat = self.decoder(z_c_center)
+        self.last_z_center = z_c_center
+        self.last_z_all = z_context_all if 'z_context_all' in locals() \
+            else None
 
         if self.target_mode == 'feature':
             pred_norm = F.normalize(pred, dim=-1)
@@ -353,22 +409,8 @@ class CONADJEPAModel(nn.Module):
 
         x_target = x[node_indices]
         l_attr = F.mse_loss(x_hat, x_target)
-        pos_mask = torch.isin(edge_index[0], node_indices) & \
-            torch.isin(edge_index[1], node_indices)
-        if torch.any(pos_mask):
-            local = {int(node): i for i, node in enumerate(
-                node_indices.tolist())}
-            rows = torch.tensor([local[int(n)] for n in
-                                 edge_index[0, pos_mask].tolist()],
-                                device=x.device)
-            cols = torch.tensor([local[int(n)] for n in
-                                 edge_index[1, pos_mask].tolist()],
-                                device=x.device)
-            l_struct = F.binary_cross_entropy(
-                a_hat[rows, cols],
-                torch.ones(rows.shape[0], device=x.device))
-        else:
-            l_struct = a_hat.new_tensor(0.0)
+        l_struct = self._structure_loss(z_c_center, self.last_z_all, a_hat,
+                                        node_indices, edge_index)
 
         total_loss = self.uncertainty_weighting([l_attr, l_struct, l_jepa])
         logs = {

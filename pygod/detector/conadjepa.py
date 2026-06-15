@@ -86,7 +86,7 @@ class CONADJEPA(Detector):
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(self.seed)
 
-    def _prepare_inputs(self, data):
+    def _prepare_inputs(self, data, inject=True):
         self.process_graph(data)
         x_cpu = data.x.detach().cpu().float()
         edge_index_cpu = data.edge_index.detach().cpu().long()
@@ -120,11 +120,17 @@ class CONADJEPA(Detector):
         topk_indices = topk_indices.to(self.device)
         topk_values = topk_values.to(self.device)
         pi_device = pi.to(self.device)
-        if self.verbose:
-            print('CONADJEPA: injecting pseudo anomalies...')
-        x_ano, edge_index_ano, y_pseudo = inject_anomalies(
-            x, edge_index, num_nodes, anomaly_ratio=self.anomaly_ratio,
-            seed=self.seed)
+        if inject:
+            if self.verbose:
+                print('CONADJEPA: injecting pseudo anomalies...')
+            x_ano, edge_index_ano, y_pseudo = inject_anomalies(
+                x, edge_index, num_nodes, anomaly_ratio=self.anomaly_ratio,
+                seed=self.seed)
+        else:
+            x_ano = x
+            edge_index_ano = edge_index
+            y_pseudo = torch.zeros(num_nodes, dtype=torch.long,
+                                   device=self.device)
 
         return {
             'x': x,
@@ -142,25 +148,60 @@ class CONADJEPA(Detector):
         return (score - score.mean()) / score.std(unbiased=False).clamp(
             min=1e-12)
 
-    def _score_from_outputs(self, residual, a_hat, x_hat, x, edge_index):
-        num_nodes = x.shape[0]
-        adj = torch.zeros((num_nodes, num_nodes), dtype=a_hat.dtype,
-                          device=a_hat.device)
-        if edge_index.numel() > 0:
-            adj[edge_index[0], edge_index[1]] = 1.0
-        struct_err = F.binary_cross_entropy(
-            a_hat.clamp(1e-6, 1.0 - 1e-6), adj, reduction='none').mean(dim=1)
-        attr_err = F.mse_loss(x_hat, x, reduction='none').mean(dim=1)
-        recon_err = self.alpha * struct_err + (1.0 - self.alpha) * attr_err
-        score = self._zscore(residual.detach()) + self._zscore(
-            recon_err.detach())
-        return score.detach().cpu()
+    def _resolve_batch_size(self, num_nodes, scoring=False):
+        if self.batch_size == 0 and self.fast_batch and \
+                self.target_mode in ('ppr', 'ego') and \
+                (self.context_mask_rate >= 1.0 or scoring):
+            return min(512, num_nodes)
+        if self.batch_size == 0:
+            return num_nodes
+        return self.batch_size
+
+    def _batch_reconstruction_error(self, x_hat, x, edge_index,
+                                    node_indices, a_hat):
+        attr_err = F.mse_loss(x_hat, x[node_indices],
+                              reduction='none').mean(dim=1)
+        z_center = self.model.last_z_center
+        z_all = self.model.last_z_all
+        if z_all is not None:
+            pred = torch.sigmoid(torch.matmul(z_center, z_all.t()))
+            target = torch.zeros_like(pred)
+            pos_mask = torch.isin(edge_index[0], node_indices)
+            if torch.any(pos_mask):
+                local = {int(node): i for i, node in enumerate(
+                    node_indices.tolist())}
+                rows = torch.tensor([local[int(n)] for n in
+                                     edge_index[0, pos_mask].tolist()],
+                                    device=x.device)
+                cols = edge_index[1, pos_mask]
+                target[rows, cols] = 1.0
+            struct_err = F.binary_cross_entropy(
+                pred.clamp(1e-6, 1.0 - 1e-6), target,
+                reduction='none').mean(dim=1)
+        else:
+            target = torch.zeros_like(a_hat)
+            pos_mask = torch.isin(edge_index[0], node_indices) & \
+                torch.isin(edge_index[1], node_indices)
+            if torch.any(pos_mask):
+                local = {int(node): i for i, node in enumerate(
+                    node_indices.tolist())}
+                rows = torch.tensor([local[int(n)] for n in
+                                     edge_index[0, pos_mask].tolist()],
+                                    device=x.device)
+                cols = torch.tensor([local[int(n)] for n in
+                                     edge_index[1, pos_mask].tolist()],
+                                    device=x.device)
+                target[rows, cols] = 1.0
+            struct_err = F.binary_cross_entropy(
+                a_hat.clamp(1e-6, 1.0 - 1e-6), target,
+                reduction='none').mean(dim=1)
+        return self.alpha * struct_err + (1.0 - self.alpha) * attr_err
 
     def fit(self, data, label=None):
         """Fit CONAD-JEPA on a PyG graph."""
         del label
         self._set_seed()
-        inputs = self._prepare_inputs(data)
+        inputs = self._prepare_inputs(data, inject=True)
         x = inputs['x']
         num_nodes, in_dim = x.shape
 
@@ -176,14 +217,7 @@ class CONADJEPA(Detector):
             context_mask_rate=self.context_mask_rate).to(self.device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
-        if self.batch_size == 0 and self.fast_batch and \
-                self.target_mode in ('ppr', 'ego') and \
-                self.context_mask_rate >= 1.0:
-            batch_size = min(512, num_nodes)
-        elif self.batch_size == 0:
-            batch_size = num_nodes
-        else:
-            batch_size = self.batch_size
+        batch_size = self._resolve_batch_size(num_nodes)
         loader = DataLoader(torch.arange(num_nodes), batch_size=batch_size,
                             shuffle=True)
 
@@ -231,17 +265,30 @@ class CONADJEPA(Detector):
         if self.model is None:
             raise RuntimeError('CONADJEPA must be fitted before scoring.')
 
-        inputs = self._prepare_inputs(data)
+        inputs = self._prepare_inputs(data, inject=False)
+        num_nodes = inputs['x'].shape[0]
+        batch_size = self._resolve_batch_size(num_nodes, scoring=True)
+        loader = DataLoader(torch.arange(num_nodes), batch_size=batch_size,
+                            shuffle=False)
+        residual_all = torch.zeros(num_nodes, device=self.device)
+        recon_all = torch.zeros(num_nodes, device=self.device)
         self.model.eval()
         with torch.no_grad():
-            _, residual, a_hat, x_hat, _ = self.model(
-                inputs['x'], inputs['edge_index'],
-                inputs['x_ano'], inputs['edge_index_ano'],
-                inputs['Pi'], inputs['topk_indices'],
-                inputs['topk_values'], inputs['y_pseudo'])
-            score = self._score_from_outputs(
-                residual, a_hat, x_hat, inputs['x'], inputs['edge_index'])
-        return score
+            for node_indices in loader:
+                node_indices = node_indices.to(self.device)
+                _, residual, a_hat, x_hat, _ = self.model(
+                    inputs['x'], inputs['edge_index'],
+                    inputs['x_ano'], inputs['edge_index_ano'],
+                    inputs['Pi'], inputs['topk_indices'],
+                    inputs['topk_values'], inputs['y_pseudo'],
+                    node_indices=node_indices)
+                recon = self._batch_reconstruction_error(
+                    x_hat, inputs['x'], inputs['edge_index'], node_indices,
+                    a_hat)
+                residual_all[node_indices] = residual.detach()
+                recon_all[node_indices] = recon.detach()
+        score = self._zscore(residual_all) + self._zscore(recon_all)
+        return score.detach().cpu()
 
 
 __all__ = ['CONADJEPA']
