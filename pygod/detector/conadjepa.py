@@ -143,8 +143,6 @@ class CONADJEPA(Detector):
         num_nodes = x.shape[0]
 
         if inject:
-            if self.verbose:
-                print('CONADJEPA: injecting pseudo anomalies...')
             x_ano, edge_index_ano, y_pseudo = inject_anomalies(
                 x, edge_index, num_nodes, anomaly_ratio=self.anomaly_ratio,
                 seed=self.seed)
@@ -164,9 +162,6 @@ class CONADJEPA(Detector):
 
     def _refresh_anomalies(self, inputs, epoch):
         """Re-inject pseudo anomalies with a different seed."""
-        if self.verbose:
-            print('CONADJEPA: refreshing pseudo anomalies '
-                  'for epoch {}'.format(epoch + 1))
         x_ano, edge_index_ano, y_pseudo = inject_anomalies(
             inputs['x'], inputs['edge_index'], inputs['x'].shape[0],
             anomaly_ratio=self.anomaly_ratio,
