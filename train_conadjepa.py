@@ -41,8 +41,9 @@ def main():
     model.fit(data)
 
     score = model.decision_score_
-    auc = eval_roc_auc(data.y.numpy(), score)
-    ap = eval_average_precision(data.y.numpy(), score)
+    label = data.y.bool().long().numpy()
+    auc = eval_roc_auc(label, score)
+    ap = eval_average_precision(label, score)
     print(f'AUC: {auc:.4f} | AP: {ap:.4f}')
 
     os.makedirs('results', exist_ok=True)

@@ -55,7 +55,7 @@ def evaluate_method(method, dataset, args):
     aucs = []
     aps = []
     data = load_data(dataset)
-    labels = data.y.numpy()
+    labels = data.y.bool().long().numpy()
     for seed in SEEDS:
         set_seed(seed)
         model = build_model(method, seed, args)
