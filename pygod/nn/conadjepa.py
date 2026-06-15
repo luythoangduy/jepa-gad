@@ -255,18 +255,15 @@ class CONADJEPAModel(nn.Module):
         if node_indices is None:
             node_indices = torch.arange(x.shape[0], device=x.device)
 
-        z_c_center = torch.stack([
-            self._context_center(v, x_ano, edge_index_ano)
-            for v in node_indices.tolist()
-        ], dim=0)
-
         if self.target_mode == 'feature':
-            z_t_center = torch.stack([
-                self._target_center(v, x, edge_index, topk_indices,
-                                    topk_values)
+            z_context_all = self.context_encoder(x_ano, edge_index_ano)
+            z_c_center = z_context_all[node_indices]
+            z_t_center = self.feature_target_encoder(x[node_indices])
+        else:
+            z_c_center = torch.stack([
+                self._context_center(v, x_ano, edge_index_ano)
                 for v in node_indices.tolist()
             ], dim=0)
-        else:
             with torch.no_grad():
                 z_t_center = torch.stack([
                     self._target_center(v, x, edge_index, topk_indices,
