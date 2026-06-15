@@ -39,6 +39,8 @@ class CONADJEPA(Detector):
                  ppr_iter=10,
                  anomaly_ratio=0.1,
                  ema_momentum=0.99,
+                 target_mode='ppr',
+                 ego_hops=1,
                  contamination=0.1,
                  device='cpu',
                  verbose=False,
@@ -57,6 +59,8 @@ class CONADJEPA(Detector):
         self.ppr_iter = ppr_iter
         self.anomaly_ratio = anomaly_ratio
         self.ema_momentum = ema_momentum
+        self.target_mode = target_mode
+        self.ego_hops = ego_hops
         self.device = torch.device(device)
         self.seed = seed
         self.model = None
@@ -82,15 +86,28 @@ class CONADJEPA(Detector):
         edge_index_cpu = data.edge_index.detach().cpu().long()
         num_nodes = x_cpu.shape[0]
 
-        if self.verbose:
-            print('CONADJEPA: computing dense PPR matrix...')
-        pi = compute_ppr(edge_index_cpu, num_nodes,
-                         alpha=self.ppr_alpha,
-                         num_iter=self.ppr_iter).float()
-        if self.verbose:
-            print('CONADJEPA: extracting top-k PPR neighbors...')
-        k = min(self.ppr_k, num_nodes)
-        topk_values, topk_indices = torch.topk(pi, k=k, dim=1)
+        if self.target_mode == 'ppr':
+            if self.verbose:
+                print('CONADJEPA: computing dense PPR matrix...')
+            pi = compute_ppr(edge_index_cpu, num_nodes,
+                             alpha=self.ppr_alpha,
+                             num_iter=self.ppr_iter).float()
+            if self.verbose:
+                print('CONADJEPA: extracting top-k PPR neighbors...')
+            k = min(self.ppr_k, num_nodes)
+            topk_values, topk_indices = torch.topk(pi, k=k, dim=1)
+        elif self.target_mode in ('ego', 'feature'):
+            if self.verbose:
+                if self.target_mode == 'ego':
+                    print('CONADJEPA: using ego-graph target view...')
+                else:
+                    print('CONADJEPA: using feature-only target view...')
+            pi = torch.empty((0, 0), dtype=torch.float32)
+            topk_indices = torch.empty((num_nodes, 0), dtype=torch.long)
+            topk_values = torch.empty((num_nodes, 0), dtype=torch.float32)
+        else:
+            raise ValueError("target_mode must be 'ppr', 'ego', "
+                             "or 'feature'.")
 
         x = x_cpu.to(self.device)
         edge_index = edge_index_cpu.to(self.device)
@@ -146,7 +163,9 @@ class CONADJEPA(Detector):
             hid_dim=self.hid_dim,
             num_layers=self.num_layers,
             dropout=self.dropout,
-            ppr_k=self.ppr_k).to(self.device)
+            ppr_k=self.ppr_k,
+            target_mode=self.target_mode,
+            ego_hops=self.ego_hops).to(self.device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         if self.batch_size == 0:

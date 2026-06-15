@@ -190,17 +190,24 @@ class CONADJEPAModel(nn.Module):
     """CONAD with JEPA-style latent prediction and PPR targets."""
 
     def __init__(self, in_dim, hid_dim=64, num_layers=2, dropout=0.0,
-                 ppr_k=32):
+                 ppr_k=32, target_mode='ppr', ego_hops=1):
         super().__init__()
         self.context_encoder = NodeEncoder(in_dim, hid_dim, num_layers,
                                            dropout)
         self.target_encoder = copy.deepcopy(self.context_encoder)
         for param in self.target_encoder.parameters():
             param.requires_grad = False
+        self.feature_target_encoder = nn.Sequential(
+            nn.Linear(in_dim, hid_dim),
+            nn.PReLU(),
+            nn.Linear(hid_dim, hid_dim),
+        )
         self.predictor = Predictor(hid_dim, hid_dim, hid_dim)
         self.decoder = Decoder(hid_dim, in_dim)
         self.uncertainty_weighting = UncertaintyWeighting(num_tasks=3)
         self.ppr_k = ppr_k
+        self.target_mode = target_mode
+        self.ego_hops = ego_hops
 
     def _context_center(self, v, x_ano, edge_index_ano):
         subset, edge_index_ctx, mapping, _ = k_hop_subgraph(
@@ -213,6 +220,16 @@ class CONADJEPAModel(nn.Module):
         return z_ctx[center_idx]
 
     def _target_center(self, v, x, edge_index, topk_indices, topk_values):
+        if self.target_mode == 'feature':
+            return self.feature_target_encoder(x[v].view(1, -1)).squeeze(0)
+
+        if self.target_mode == 'ego':
+            subset, edge_index_sub, mapping, _ = k_hop_subgraph(
+                int(v), self.ego_hops, edge_index, relabel_nodes=True,
+                num_nodes=x.shape[0])
+            z_t = self.target_encoder(x[subset], edge_index_sub)
+            return z_t[int(mapping.item())]
+
         nodes = topk_indices[v]
         values = topk_values[v]
         if not torch.any(nodes == v):
@@ -243,19 +260,30 @@ class CONADJEPAModel(nn.Module):
             for v in node_indices.tolist()
         ], dim=0)
 
-        with torch.no_grad():
+        if self.target_mode == 'feature':
             z_t_center = torch.stack([
                 self._target_center(v, x, edge_index, topk_indices,
                                     topk_values)
                 for v in node_indices.tolist()
             ], dim=0)
+        else:
+            with torch.no_grad():
+                z_t_center = torch.stack([
+                    self._target_center(v, x, edge_index, topk_indices,
+                                        topk_values)
+                    for v in node_indices.tolist()
+                ], dim=0)
 
         pred = self.predictor(z_c_center)
         a_hat, x_hat = self.decoder(z_c_center)
 
-        pred_norm = F.normalize(pred, dim=-1)
-        z_t_norm = F.normalize(z_t_center, dim=-1)
-        residual = 1.0 - (pred_norm * z_t_norm).sum(dim=-1)
+        if self.target_mode == 'feature':
+            residual = F.mse_loss(pred, z_t_center, reduction='none').mean(
+                dim=-1)
+        else:
+            pred_norm = F.normalize(pred, dim=-1)
+            z_t_norm = F.normalize(z_t_center, dim=-1)
+            residual = 1.0 - (pred_norm * z_t_norm).sum(dim=-1)
 
         y_batch = y_pseudo[node_indices]
         normal_mask = y_batch == 0

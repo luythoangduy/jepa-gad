@@ -22,10 +22,20 @@ def main():
                         choices=['weibo', 'inj_cora', 'inj_amazon',
                                  'reddit'])
     parser.add_argument('--device', default='cpu')
+    parser.add_argument('--epoch', type=int, default=100)
+    parser.add_argument('--target-mode', default='ppr',
+                        choices=['ppr', 'ego', 'feature'])
+    parser.add_argument('--ego-hops', type=int, default=1)
+    parser.add_argument('--ppr-k', type=int, default=32)
     args = parser.parse_args()
 
     data = load_data(args.dataset)
-    model = CONADJEPA(device=args.device, verbose=True)
+    model = CONADJEPA(device=args.device,
+                      verbose=True,
+                      epoch=args.epoch,
+                      target_mode=args.target_mode,
+                      ego_hops=args.ego_hops,
+                      ppr_k=args.ppr_k)
     model.fit(data)
 
     score = model.decision_score_
