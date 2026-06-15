@@ -47,6 +47,7 @@ class CONADJEPA(Detector):
                  attr_loss_weight=1.0,
                  struct_loss_weight=1.0,
                  jepa_loss_weight=1.0,
+                 struct_row_all=True,
                  contamination=0.1,
                  device='cpu',
                  verbose=False,
@@ -74,6 +75,7 @@ class CONADJEPA(Detector):
         self.attr_loss_weight = attr_loss_weight
         self.struct_loss_weight = struct_loss_weight
         self.jepa_loss_weight = jepa_loss_weight
+        self.struct_row_all = struct_row_all
         self.device = torch.device(device)
         self.seed = seed
         self.model = None
@@ -180,9 +182,9 @@ class CONADJEPA(Detector):
                                     node_indices, a_hat):
         diff_attr = torch.pow(x[node_indices] - x_hat, 2)
         attr_err = torch.sqrt(torch.sum(diff_attr, dim=1).clamp(min=1e-12))
-        z_center = self.model.last_z_center
-        z_all = self.model.last_z_all
-        if z_all is not None:
+        z_center = self.model.last_z_struct_center
+        z_all = self.model.last_z_struct_all
+        if z_all is not None and self.struct_row_all:
             pred = torch.matmul(z_center, z_all.t())
             target = torch.zeros_like(pred)
             pos_mask = torch.isin(edge_index[0], node_indices)
@@ -236,7 +238,8 @@ class CONADJEPA(Detector):
             context_mask_rate=self.context_mask_rate,
             attr_loss_weight=self.attr_loss_weight,
             struct_loss_weight=self.struct_loss_weight,
-            jepa_loss_weight=self.jepa_loss_weight).to(self.device)
+            jepa_loss_weight=self.jepa_loss_weight,
+            struct_row_all=self.struct_row_all).to(self.device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         batch_size = self._resolve_batch_size(num_nodes)
@@ -257,6 +260,7 @@ class CONADJEPA(Detector):
             epoch_attr = 0.0
             epoch_struct = 0.0
             epoch_jepa = 0.0
+            epoch_feature_online = 0.0
             epoch_w_attr = 0.0
             epoch_w_struct = 0.0
             epoch_w_jepa = 0.0
@@ -282,6 +286,8 @@ class CONADJEPA(Detector):
                 epoch_attr += logs['loss_attr'] * batch_count
                 epoch_struct += logs['loss_struct'] * batch_count
                 epoch_jepa += logs['loss_jepa'] * batch_count
+                epoch_feature_online += logs['loss_feature_online'] * \
+                    batch_count
                 epoch_w_attr += logs['weighted_attr'] * batch_count
                 epoch_w_struct += logs['weighted_struct'] * batch_count
                 epoch_w_jepa += logs['weighted_jepa'] * batch_count
@@ -293,6 +299,7 @@ class CONADJEPA(Detector):
             attr_value = epoch_attr / num_nodes
             struct_value = epoch_struct / num_nodes
             jepa_value = epoch_jepa / num_nodes
+            feature_online_value = epoch_feature_online / num_nodes
             w_attr_value = epoch_w_attr / num_nodes
             w_struct_value = epoch_w_struct / num_nodes
             w_jepa_value = epoch_w_jepa / num_nodes
@@ -307,7 +314,10 @@ class CONADJEPA(Detector):
                         jepa='{:.4f}'.format(jepa_value),
                         resid='{:.4f}'.format(residual_value),
                         w_attr='{:.4f}'.format(w_attr_value),
-                        w_jepa='{:.4f}'.format(w_jepa_value))
+                        w_struct='{:.4f}'.format(w_struct_value),
+                        w_jepa='{:.4f}'.format(w_jepa_value),
+                        feat_online='{:.4f}'.format(
+                            feature_online_value))
                 else:
                     epoch_iter.set_postfix(loss='{:.6f}'.format(loss_value))
             elif self.verbose:
@@ -315,12 +325,13 @@ class CONADJEPA(Detector):
                     print('Epoch {:04d}: loss={:.6f} | attr={:.6f} | '
                           'struct={:.6f} | jepa={:.6f} | residual={:.6f} | '
                           'margin={:.6f} | weighted_attr={:.6f} | '
-                          'weighted_struct={:.6f} | weighted_jepa={:.6f}'
+                          'weighted_struct={:.6f} | weighted_jepa={:.6f} | '
+                          'feature_online={:.6f}'
                           .format(
                               epoch + 1, loss_value, attr_value,
                               struct_value, jepa_value, residual_value,
                               margin_value, w_attr_value, w_struct_value,
-                              w_jepa_value))
+                              w_jepa_value, feature_online_value))
                 else:
                     print('Epoch {:04d}: loss={:.6f}'.format(
                         epoch + 1, loss_value))

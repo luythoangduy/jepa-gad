@@ -150,19 +150,33 @@ class Predictor(nn.Module):
 class Decoder(nn.Module):
     """Structure and attribute decoder for CONAD-JEPA."""
 
-    def __init__(self, in_dim, out_dim):
+    def __init__(self, in_dim, out_dim, num_layers=2, dropout=0.0):
         super().__init__()
-        self.attr_decoder = nn.Sequential(
-            nn.Linear(in_dim, in_dim),
-            nn.PReLU(),
-            nn.Linear(in_dim, out_dim),
-        )
+        self.dropout = dropout
+        attr_dims = [in_dim] + [in_dim] * max(0, num_layers - 1) + [out_dim]
+        self.attr_convs = nn.ModuleList([
+            GCNConv(attr_dims[i], attr_dims[i + 1])
+            for i in range(len(attr_dims) - 1)
+        ])
+        self.attr_acts = nn.ModuleList([
+            nn.PReLU() for _ in range(max(0, len(attr_dims) - 2))
+        ])
+        self.struct_decoder = NodeEncoder(in_dim, in_dim,
+                                          max(1, num_layers - 1),
+                                          dropout)
 
-    def forward(self, z):
+    def forward(self, z, edge_index):
         """Decode latent embeddings into adjacency and attributes."""
-        a_hat = torch.matmul(z, z.t())
-        x_hat = self.attr_decoder(z)
-        return a_hat, x_hat
+        x_hat = z
+        for i, conv in enumerate(self.attr_convs):
+            x_hat = conv(x_hat, edge_index)
+            if i != len(self.attr_convs) - 1:
+                x_hat = self.attr_acts[i](x_hat)
+                x_hat = F.dropout(x_hat, p=self.dropout,
+                                  training=self.training)
+        z_struct = self.struct_decoder(z, edge_index)
+        a_hat = torch.matmul(z_struct, z_struct.t())
+        return a_hat, x_hat, z_struct
 
 
 class UncertaintyWeighting(nn.Module):
@@ -193,22 +207,23 @@ class CONADJEPAModel(nn.Module):
                  ppr_k=32, target_mode='ppr', ego_hops=1,
                  fast_batch=True, context_mask_rate=1.0,
                  attr_loss_weight=1.0, struct_loss_weight=1.0,
-                 jepa_loss_weight=1.0):
+                 jepa_loss_weight=1.0, struct_row_all=True):
         super().__init__()
         self.context_encoder = NodeEncoder(in_dim, hid_dim, num_layers,
                                            dropout)
         self.target_encoder = copy.deepcopy(self.context_encoder)
         for param in self.target_encoder.parameters():
             param.requires_grad = False
-        self.feature_target_encoder = nn.Sequential(
+        self.feature_encoder = nn.Sequential(
             nn.Linear(in_dim, hid_dim),
             nn.PReLU(),
             nn.Linear(hid_dim, hid_dim),
         )
+        self.feature_target_encoder = copy.deepcopy(self.feature_encoder)
         for param in self.feature_target_encoder.parameters():
             param.requires_grad = False
         self.predictor = Predictor(hid_dim, hid_dim, hid_dim)
-        self.decoder = Decoder(hid_dim, in_dim)
+        self.decoder = Decoder(hid_dim, in_dim, num_layers, dropout)
         self.uncertainty_weighting = UncertaintyWeighting(num_tasks=3)
         self.ppr_k = ppr_k
         self.target_mode = target_mode
@@ -218,8 +233,11 @@ class CONADJEPAModel(nn.Module):
         self.attr_loss_weight = attr_loss_weight
         self.struct_loss_weight = struct_loss_weight
         self.jepa_loss_weight = jepa_loss_weight
+        self.struct_row_all = struct_row_all
         self.last_z_center = None
         self.last_z_all = None
+        self.last_z_struct_center = None
+        self.last_z_struct_all = None
 
     def _context_center(self, v, x_ano, edge_index_ano):
         subset, edge_index_ctx, mapping, _ = k_hop_subgraph(
@@ -292,7 +310,7 @@ class CONADJEPAModel(nn.Module):
             diff = torch.pow(target - pred, 2)
             return torch.sqrt(torch.sum(diff, dim=1).clamp(min=1e-12))
 
-        if z_all is None:
+        if z_all is None or not self.struct_row_all:
             target = torch.zeros_like(a_hat)
             pos_mask = torch.isin(edge_index[0], node_indices) & \
                 torch.isin(edge_index[1], node_indices)
@@ -333,6 +351,7 @@ class CONADJEPAModel(nn.Module):
             z_c_center = z_context_all[node_indices]
             with torch.no_grad():
                 z_t_center = self.feature_target_encoder(x[node_indices])
+            z_t_online = self.feature_encoder(x[node_indices])
         elif self.fast_batch:
             if self.training and self.context_mask_rate < 1.0:
                 mask_prob = torch.rand(node_indices.shape[0],
@@ -367,20 +386,43 @@ class CONADJEPAModel(nn.Module):
                 ], dim=0)
 
         pred = self.predictor(z_c_center)
-        a_hat, x_hat = self.decoder(z_c_center)
         self.last_z_center = z_c_center
         self.last_z_all = z_context_all if 'z_context_all' in locals() \
             else None
+        if self.last_z_all is not None:
+            a_hat_all, x_hat_all, z_struct_all = self.decoder(
+                self.last_z_all, edge_index_ano)
+            x_hat = x_hat_all[node_indices]
+            self.last_z_struct_all = z_struct_all
+            self.last_z_struct_center = z_struct_all[node_indices]
+            if self.struct_row_all:
+                a_hat = torch.matmul(self.last_z_struct_center,
+                                     self.last_z_struct_center.t())
+            else:
+                a_hat = torch.matmul(self.last_z_struct_center,
+                                     self.last_z_struct_center.t())
+        else:
+            loop = torch.arange(z_c_center.shape[0], device=x.device)
+            decoder_edge_index = torch.stack([loop, loop], dim=0)
+            a_hat, x_hat, z_struct = self.decoder(z_c_center,
+                                                  decoder_edge_index)
+            self.last_z_struct_center = z_struct
+            self.last_z_struct_all = None
 
         if self.target_mode == 'feature':
             pred_norm = F.normalize(pred, dim=-1)
             z_t_norm = F.normalize(z_t_center, dim=-1)
             residual = F.mse_loss(pred_norm, z_t_norm,
                                   reduction='none').sum(dim=-1)
+            z_t_online_norm = F.normalize(z_t_online, dim=-1)
+            feature_online_loss = F.mse_loss(
+                z_t_online_norm, pred_norm.detach(),
+                reduction='none').sum(dim=-1).mean()
         else:
             pred_norm = F.normalize(pred, dim=-1)
             z_t_norm = F.normalize(z_t_center, dim=-1)
             residual = 1.0 - (pred_norm * z_t_norm).sum(dim=-1)
+            feature_online_loss = residual.new_tensor(0.0)
 
         y_batch = y_pseudo[node_indices]
         normal_mask = y_batch == 0
@@ -398,13 +440,14 @@ class CONADJEPAModel(nn.Module):
                 m_adaptive - residual[anomaly_mask]).pow(2).mean()
         else:
             l_jepa_margin = residual.new_tensor(0.0)
-        l_jepa = l_jepa_normal + l_jepa_margin
+        l_jepa = l_jepa_normal + l_jepa_margin + feature_online_loss
 
         x_target = x[node_indices]
         diff_attr = torch.pow(x_target - x_hat, 2)
         attr_error = torch.sqrt(torch.sum(diff_attr, dim=1).clamp(min=1e-12))
         l_attr = attr_error.mean()
-        l_struct = self._structure_loss(z_c_center, self.last_z_all, a_hat,
+        l_struct = self._structure_loss(self.last_z_struct_center,
+                                        self.last_z_struct_all, a_hat,
                                         node_indices, edge_index)
 
         weighted_attr = self.attr_loss_weight * l_attr
@@ -416,6 +459,7 @@ class CONADJEPAModel(nn.Module):
             'loss_attr': float(l_attr.detach().cpu()),
             'loss_struct': float(l_struct.detach().cpu()),
             'loss_jepa': float(l_jepa.detach().cpu()),
+            'loss_feature_online': float(feature_online_loss.detach().cpu()),
             'weighted_attr': float(weighted_attr.detach().cpu()),
             'weighted_struct': float(weighted_struct.detach().cpu()),
             'weighted_jepa': float(weighted_jepa.detach().cpu()),
@@ -430,3 +474,7 @@ class CONADJEPAModel(nn.Module):
                                     self.target_encoder.parameters()):
             param_t.data.mul_(momentum)
             param_t.data.add_(param_c.data, alpha=1.0 - momentum)
+        for param_o, param_t in zip(self.feature_encoder.parameters(),
+                                    self.feature_target_encoder.parameters()):
+            param_t.data.mul_(momentum)
+            param_t.data.add_(param_o.data, alpha=1.0 - momentum)
