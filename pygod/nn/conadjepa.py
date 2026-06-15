@@ -160,7 +160,7 @@ class Decoder(nn.Module):
 
     def forward(self, z):
         """Decode latent embeddings into adjacency and attributes."""
-        a_hat = torch.sigmoid(torch.matmul(z, z.t()))
+        a_hat = torch.matmul(z, z.t())
         x_hat = self.attr_decoder(z)
         return a_hat, x_hat
 
@@ -288,50 +288,38 @@ class CONADJEPAModel(nn.Module):
 
     def _structure_loss(self, z_center, z_all, a_hat, node_indices,
                         edge_index):
+        def conad_structure_error(pred, target):
+            diff = torch.pow(target - pred, 2)
+            return torch.sqrt(torch.sum(diff, dim=1).clamp(min=1e-12))
+
         if z_all is None:
+            target = torch.zeros_like(a_hat)
             pos_mask = torch.isin(edge_index[0], node_indices) & \
                 torch.isin(edge_index[1], node_indices)
-            if not torch.any(pos_mask):
-                return a_hat.new_tensor(0.0)
             local = {int(node): i for i, node in enumerate(
                 node_indices.tolist())}
-            rows = torch.tensor([local[int(n)] for n in
-                                 edge_index[0, pos_mask].tolist()],
-                                device=z_center.device)
-            cols = torch.tensor([local[int(n)] for n in
-                                 edge_index[1, pos_mask].tolist()],
-                                device=z_center.device)
-            pos_pred = a_hat[rows, cols]
-            neg_rows = torch.randint(0, z_center.shape[0], rows.shape,
-                                     device=z_center.device)
-            neg_cols = torch.randint(0, z_center.shape[0], cols.shape,
-                                     device=z_center.device)
-            neg_pred = a_hat[neg_rows, neg_cols]
+            if torch.any(pos_mask):
+                rows = torch.tensor([local[int(n)] for n in
+                                     edge_index[0, pos_mask].tolist()],
+                                    device=z_center.device)
+                cols = torch.tensor([local[int(n)] for n in
+                                     edge_index[1, pos_mask].tolist()],
+                                    device=z_center.device)
+                target[rows, cols] = 1.0
+            return conad_structure_error(a_hat, target).mean()
         else:
+            pred = torch.matmul(z_center, z_all.t())
+            target = torch.zeros_like(pred)
             pos_mask = torch.isin(edge_index[0], node_indices)
-            if not torch.any(pos_mask):
-                return z_center.new_tensor(0.0)
             local = {int(node): i for i, node in enumerate(
                 node_indices.tolist())}
-            rows = torch.tensor([local[int(n)] for n in
-                                 edge_index[0, pos_mask].tolist()],
-                                device=z_center.device)
-            cols = edge_index[1, pos_mask]
-            pos_pred = torch.sigmoid((z_center[rows] * z_all[cols]).sum(1))
-            neg_rows = torch.randint(0, z_center.shape[0], rows.shape,
-                                     device=z_center.device)
-            neg_cols = torch.randint(0, z_all.shape[0], cols.shape,
-                                     device=z_center.device)
-            neg_pred = torch.sigmoid(
-                (z_center[neg_rows] * z_all[neg_cols]).sum(1))
-
-        pos_loss = F.binary_cross_entropy(
-            pos_pred.clamp(1e-6, 1.0 - 1e-6),
-            torch.ones_like(pos_pred))
-        neg_loss = F.binary_cross_entropy(
-            neg_pred.clamp(1e-6, 1.0 - 1e-6),
-            torch.zeros_like(neg_pred))
-        return pos_loss + neg_loss
+            if torch.any(pos_mask):
+                rows = torch.tensor([local[int(n)] for n in
+                                     edge_index[0, pos_mask].tolist()],
+                                    device=z_center.device)
+                cols = edge_index[1, pos_mask]
+                target[rows, cols] = 1.0
+            return conad_structure_error(pred, target).mean()
 
     def forward(self, x, edge_index, x_ano, edge_index_ano, Pi,
                 topk_indices, topk_values, y_pseudo, node_indices=None):
@@ -413,7 +401,9 @@ class CONADJEPAModel(nn.Module):
         l_jepa = l_jepa_normal + l_jepa_margin
 
         x_target = x[node_indices]
-        l_attr = F.mse_loss(x_hat, x_target)
+        diff_attr = torch.pow(x_target - x_hat, 2)
+        attr_error = torch.sqrt(torch.sum(diff_attr, dim=1).clamp(min=1e-12))
+        l_attr = attr_error.mean()
         l_struct = self._structure_loss(z_c_center, self.last_z_all, a_hat,
                                         node_indices, edge_index)
 

@@ -53,6 +53,7 @@ def build_model(method, seed, args):
                         grad_clip=args.grad_clip,
                         batch_size=args.batch_size,
                         context_mask_rate=args.context_mask_rate,
+                        refresh_anomaly_every=args.refresh_anomaly_every,
                         attr_loss_weight=args.attr_loss_weight,
                         struct_loss_weight=args.struct_loss_weight,
                         jepa_loss_weight=args.jepa_loss_weight,
@@ -106,6 +107,9 @@ def main():
     parser.add_argument('--ppr-k', type=int, default=32)
     parser.add_argument('--grad-clip', type=float, default=5.0)
     parser.add_argument('--context-mask-rate', type=float, default=1.0)
+    parser.add_argument('--refresh-anomaly-every', type=int, default=1,
+                        help='Refresh pseudo anomaly view every N epochs. '
+                             'Use 0 to keep one fixed view.')
     parser.add_argument('--attr-loss-weight', type=float, default=1.0)
     parser.add_argument('--struct-loss-weight', type=float, default=1.0)
     parser.add_argument('--jepa-loss-weight', type=float, default=1.0)

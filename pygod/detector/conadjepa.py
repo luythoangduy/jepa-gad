@@ -9,7 +9,6 @@ import random
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from . import Detector
@@ -44,6 +43,7 @@ class CONADJEPA(Detector):
                  grad_clip=5.0,
                  fast_batch=True,
                  context_mask_rate=1.0,
+                 refresh_anomaly_every=1,
                  attr_loss_weight=1.0,
                  struct_loss_weight=1.0,
                  jepa_loss_weight=1.0,
@@ -70,6 +70,7 @@ class CONADJEPA(Detector):
         self.grad_clip = grad_clip
         self.fast_batch = fast_batch
         self.context_mask_rate = context_mask_rate
+        self.refresh_anomaly_every = refresh_anomaly_every
         self.attr_loss_weight = attr_loss_weight
         self.struct_loss_weight = struct_loss_weight
         self.jepa_loss_weight = jepa_loss_weight
@@ -149,6 +150,18 @@ class CONADJEPA(Detector):
             'y_pseudo': y_pseudo,
         }
 
+    def _refresh_anomalies(self, inputs, epoch):
+        if self.verbose and self.target_mode == 'feature':
+            print('CONADJEPA feature debug: refreshing pseudo anomalies '
+                  'for epoch {}'.format(epoch + 1))
+        x_ano, edge_index_ano, y_pseudo = inject_anomalies(
+            inputs['x'], inputs['edge_index'], inputs['x'].shape[0],
+            anomaly_ratio=self.anomaly_ratio,
+            seed=self.seed + epoch)
+        inputs['x_ano'] = x_ano
+        inputs['edge_index_ano'] = edge_index_ano
+        inputs['y_pseudo'] = y_pseudo
+
     @staticmethod
     def _zscore(score):
         return (score - score.mean()) / score.std(unbiased=False).clamp(
@@ -165,12 +178,12 @@ class CONADJEPA(Detector):
 
     def _batch_reconstruction_error(self, x_hat, x, edge_index,
                                     node_indices, a_hat):
-        attr_err = F.mse_loss(x_hat, x[node_indices],
-                              reduction='none').mean(dim=1)
+        diff_attr = torch.pow(x[node_indices] - x_hat, 2)
+        attr_err = torch.sqrt(torch.sum(diff_attr, dim=1).clamp(min=1e-12))
         z_center = self.model.last_z_center
         z_all = self.model.last_z_all
         if z_all is not None:
-            pred = torch.sigmoid(torch.matmul(z_center, z_all.t()))
+            pred = torch.matmul(z_center, z_all.t())
             target = torch.zeros_like(pred)
             pos_mask = torch.isin(edge_index[0], node_indices)
             if torch.any(pos_mask):
@@ -181,9 +194,9 @@ class CONADJEPA(Detector):
                                     device=x.device)
                 cols = edge_index[1, pos_mask]
                 target[rows, cols] = 1.0
-            struct_err = F.binary_cross_entropy(
-                pred.clamp(1e-6, 1.0 - 1e-6), target,
-                reduction='none').mean(dim=1)
+            diff_struct = torch.pow(target - pred, 2)
+            struct_err = torch.sqrt(torch.sum(diff_struct, dim=1).clamp(
+                min=1e-12))
         else:
             target = torch.zeros_like(a_hat)
             pos_mask = torch.isin(edge_index[0], node_indices) & \
@@ -198,9 +211,9 @@ class CONADJEPA(Detector):
                                      edge_index[1, pos_mask].tolist()],
                                     device=x.device)
                 target[rows, cols] = 1.0
-            struct_err = F.binary_cross_entropy(
-                a_hat.clamp(1e-6, 1.0 - 1e-6), target,
-                reduction='none').mean(dim=1)
+            diff_struct = torch.pow(target - a_hat, 2)
+            struct_err = torch.sqrt(torch.sum(diff_struct, dim=1).clamp(
+                min=1e-12))
         return self.alpha * struct_err + (1.0 - self.alpha) * attr_err
 
     def fit(self, data, label=None):
@@ -236,6 +249,10 @@ class CONADJEPA(Detector):
         else:
             epoch_iter = range(self.epoch)
         for epoch in epoch_iter:
+            if epoch > 0 and self.refresh_anomaly_every and \
+                    self.refresh_anomaly_every > 0 and \
+                    epoch % self.refresh_anomaly_every == 0:
+                self._refresh_anomalies(inputs, epoch)
             epoch_loss = 0.0
             epoch_attr = 0.0
             epoch_struct = 0.0
