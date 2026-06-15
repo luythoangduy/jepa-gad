@@ -2,6 +2,7 @@ from .adone import AdONEBase
 from .anomalydae import AnomalyDAEBase
 from .card import CARDBase
 from .cola import CoLABase
+from .conadjepa import CONADJEPAModel
 from .dmgd import DMGDBase
 from .dominant import DOMINANTBase
 from .done import DONEBase
@@ -17,7 +18,7 @@ from . import encoder
 from . import functional
 
 __all__ = [
-    "AdONEBase", "AnomalyDAEBase", "CARDBase", "CoLABase", "DMGDBase", "DOMINANTBase",
+    "AdONEBase", "AnomalyDAEBase", "CARDBase", "CoLABase", "CONADJEPAModel", "DMGDBase", "DOMINANTBase",
     "DONEBase", "GAANBase", "GADNRBase", "GAEBase", "GUIDEBase",
     "GADJEPABase", "OCGNNBase"
 ]

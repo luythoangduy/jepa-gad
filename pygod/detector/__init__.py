@@ -7,6 +7,7 @@ from .anomalydae import AnomalyDAE
 from .card import CARD
 from .cola import CoLA
 from .conad import CONAD
+from .conadjepa import CONADJEPA
 from .dmgd import DMGD
 from .dominant import DOMINANT
 from .done import DONE
@@ -22,6 +23,6 @@ from .scan import SCAN
 
 __all__ = [
     "Detector", "DeepDetector", "AdONE", "ANOMALOUS", "AnomalyDAE", "CARD", "CoLA",
-    "CONAD", "DMGD", "DOMINANT", "DONE", "GAAN", "GADNR", "GAE", "GUIDE",
+    "CONAD", "CONADJEPA", "DMGD", "DOMINANT", "DONE", "GAAN", "GADNR", "GAE", "GUIDE",
     "GADJEPA", "OCGNN", "ONE", "Radar", "SCAN"
 ]

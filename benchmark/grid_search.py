@@ -16,7 +16,7 @@ from torch_geometric.nn import GAT
 
 def run_grid_search():
     # 3 Dataset thực tế (Real-world datasets), không dùng bộ injected/synthetic
-    datasets = ['reddit']
+    datasets = ['weibo']
     num_trial = 5
     epoch = 100
     gpu = -1
