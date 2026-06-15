@@ -41,6 +41,7 @@ class CONADJEPA(Detector):
                  ema_momentum=0.99,
                  target_mode='ppr',
                  ego_hops=1,
+                 grad_clip=5.0,
                  contamination=0.1,
                  device='cpu',
                  verbose=False,
@@ -61,6 +62,7 @@ class CONADJEPA(Detector):
         self.ema_momentum = ema_momentum
         self.target_mode = target_mode
         self.ego_hops = ego_hops
+        self.grad_clip = grad_clip
         self.device = torch.device(device)
         self.seed = seed
         self.model = None
@@ -192,6 +194,9 @@ class CONADJEPA(Detector):
                     inputs['topk_values'], inputs['y_pseudo'],
                     node_indices=node_indices)
                 loss.backward()
+                if self.grad_clip is not None and self.grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(),
+                                                   self.grad_clip)
                 optimizer.step()
                 self.model.update_target_encoder(self.ema_momentum)
                 epoch_loss += loss.item() * node_indices.numel()

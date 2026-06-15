@@ -275,8 +275,10 @@ class CONADJEPAModel(nn.Module):
         a_hat, x_hat = self.decoder(z_c_center)
 
         if self.target_mode == 'feature':
-            residual = F.mse_loss(pred, z_t_center, reduction='none').mean(
-                dim=-1)
+            pred_norm = F.normalize(pred, dim=-1)
+            z_t_norm = F.normalize(z_t_center, dim=-1)
+            residual = F.mse_loss(pred_norm, z_t_norm,
+                                  reduction='none').sum(dim=-1)
         else:
             pred_norm = F.normalize(pred, dim=-1)
             z_t_norm = F.normalize(z_t_center, dim=-1)

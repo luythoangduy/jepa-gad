@@ -27,6 +27,7 @@ def main():
                         choices=['ppr', 'ego', 'feature'])
     parser.add_argument('--ego-hops', type=int, default=1)
     parser.add_argument('--ppr-k', type=int, default=32)
+    parser.add_argument('--grad-clip', type=float, default=5.0)
     args = parser.parse_args()
 
     data = load_data(args.dataset)
@@ -35,7 +36,8 @@ def main():
                       epoch=args.epoch,
                       target_mode=args.target_mode,
                       ego_hops=args.ego_hops,
-                      ppr_k=args.ppr_k)
+                      ppr_k=args.ppr_k,
+                      grad_clip=args.grad_clip)
     model.fit(data)
 
     score = model.decision_score_
