@@ -15,7 +15,7 @@ import numpy as np
 import torch
 
 from pygod.detector import CONADJEPA
-from pygod.metric import eval_average_precision, eval_roc_auc
+from pygod.metric import eval_average_precision, eval_roc_auc, eval_recall_at_k
 from pygod.utils import load_data
 
 
@@ -140,6 +140,7 @@ def main():
     # --- Run trials ---
     all_aucs = []
     all_aps = []
+    all_recs = []
     all_times = []
 
     for i, seed in enumerate(args.seeds):
@@ -182,12 +183,14 @@ def main():
         score = model.decision_score_
         auc = eval_roc_auc(labels, score)
         ap = eval_average_precision(labels, score)
+        rec = eval_recall_at_k(labels, score)
 
         all_aucs.append(auc)
         all_aps.append(ap)
+        all_recs.append(rec)
         all_times.append(elapsed)
 
-        print(f'  AUC: {auc:.4f}  |  AP: {ap:.4f}  |  Time: {elapsed:.1f}s')
+        print(f'  AUC: {auc:.4f}  |  AP: {ap:.4f}  |  Recall@k: {rec:.4f}  |  Time: {elapsed:.1f}s')
 
         if args.save_scores:
             import os
@@ -206,6 +209,8 @@ def main():
           f'(min={np.min(all_aucs):.4f}, max={np.max(all_aucs):.4f})')
     print(f'  AP:   {np.mean(all_aps):.4f} +/- {np.std(all_aps):.4f}  '
           f'(min={np.min(all_aps):.4f}, max={np.max(all_aps):.4f})')
+    print(f'  Rec:  {np.mean(all_recs):.4f} +/- {np.std(all_recs):.4f}  '
+          f'(min={np.min(all_recs):.4f}, max={np.max(all_recs):.4f})')
     print(f'  Time: {np.mean(all_times):.1f}s +/- {np.std(all_times):.1f}s')
     print('=' * 70)
 
