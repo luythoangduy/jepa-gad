@@ -29,6 +29,7 @@ def main():
     parser.add_argument('--ego-hops', type=int, default=1)
     parser.add_argument('--ppr-k', type=int, default=32)
     parser.add_argument('--grad-clip', type=float, default=5.0)
+    parser.add_argument('--context-mask-rate', type=float, default=1.0)
     parser.add_argument('--exact-subgraph', action='store_true',
                         help='Use slower per-node subgraph extraction.')
     args = parser.parse_args()
@@ -42,6 +43,7 @@ def main():
                       ego_hops=args.ego_hops,
                       ppr_k=args.ppr_k,
                       grad_clip=args.grad_clip,
+                      context_mask_rate=args.context_mask_rate,
                       fast_batch=not args.exact_subgraph)
     model.fit(data)
 

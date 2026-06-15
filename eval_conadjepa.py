@@ -52,6 +52,7 @@ def build_model(method, seed, args):
                         ppr_k=args.ppr_k,
                         grad_clip=args.grad_clip,
                         batch_size=args.batch_size,
+                        context_mask_rate=args.context_mask_rate,
                         fast_batch=not args.exact_subgraph,
                         verbose=args.verbose)
     raise ValueError(method)
@@ -101,6 +102,7 @@ def main():
     parser.add_argument('--ego-hops', type=int, default=1)
     parser.add_argument('--ppr-k', type=int, default=32)
     parser.add_argument('--grad-clip', type=float, default=5.0)
+    parser.add_argument('--context-mask-rate', type=float, default=1.0)
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--exact-subgraph', action='store_true',
                         help='Use slower per-node subgraph extraction.')

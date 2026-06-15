@@ -191,7 +191,7 @@ class CONADJEPAModel(nn.Module):
 
     def __init__(self, in_dim, hid_dim=64, num_layers=2, dropout=0.0,
                  ppr_k=32, target_mode='ppr', ego_hops=1,
-                 fast_batch=True):
+                 fast_batch=True, context_mask_rate=1.0):
         super().__init__()
         self.context_encoder = NodeEncoder(in_dim, hid_dim, num_layers,
                                            dropout)
@@ -210,6 +210,7 @@ class CONADJEPAModel(nn.Module):
         self.target_mode = target_mode
         self.ego_hops = ego_hops
         self.fast_batch = fast_batch
+        self.context_mask_rate = context_mask_rate
 
     def _context_center(self, v, x_ano, edge_index_ano):
         subset, edge_index_ctx, mapping, _ = k_hop_subgraph(
@@ -287,14 +288,26 @@ class CONADJEPAModel(nn.Module):
             z_c_center = z_context_all[node_indices]
             z_t_center = self.feature_target_encoder(x[node_indices])
         elif self.fast_batch:
+            if self.training and self.context_mask_rate < 1.0:
+                mask_prob = torch.rand(node_indices.shape[0],
+                                       device=x.device)
+                keep = mask_prob < self.context_mask_rate
+                if not torch.any(keep):
+                    keep[torch.randint(0, keep.shape[0], (1,),
+                                       device=x.device)] = True
+                active_indices = node_indices[keep]
+            else:
+                active_indices = node_indices
+
             x_ctx = x_ano.clone()
-            x_ctx[node_indices] = 0.0
+            x_ctx[active_indices] = 0.0
             z_context_all = self.context_encoder(x_ctx, edge_index_ano)
-            z_c_center = z_context_all[node_indices]
+            z_c_center = z_context_all[active_indices]
             with torch.no_grad():
                 z_t_center = self._fast_target_centers(
                     x, edge_index, topk_indices, topk_values,
-                    node_indices)
+                    active_indices)
+            node_indices = active_indices
         else:
             z_c_center = torch.stack([
                 self._context_center(v, x_ano, edge_index_ano)
